@@ -1,0 +1,31 @@
+# DefinitionDrift — Phase 1 requirements
+# Zero purchase — all free to use within Anthropic free tier
+
+# Core LLM
+anthropic>=0.40.0
+
+# Agent orchestration
+langgraph>=0.2.0
+
+# API server
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0
+
+# SQL parsing + schema diffing
+sqlglot>=23.0.0
+
+# Embeddings (local, free, runs on CPU — highly recommended)
+sentence-transformers>=3.0.0
+
+# Scheduling (HOTL drift digest)
+apscheduler>=3.10.0
+
+# MCP server
+mcp>=1.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+
+# Dev / testing only
+httpx>=0.27.0
