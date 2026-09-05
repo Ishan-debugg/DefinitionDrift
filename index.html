@@ -1,0 +1,2578 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DefinitionDrift</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --s1: #161b22;
+            --s2: #21262d;
+            --s3: #30363d;
+            --border: #30363d;
+            --accent: #7c3aed;
+            --accent2: #a78bfa;
+            --accent3: #ede9fe;
+            --green: #22c55e;
+            --yellow: #f59e0b;
+            --red: #ef4444;
+            --blue: #3b82f6;
+            --text: #e6edf3;
+            --text2: #8b949e;
+            --text3: #6e7681;
+            --r6: 6px;
+            --r8: 8px;
+            --r12: 12px;
+            --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        html,
+        body,
+        #root {
+            height: 100%;
+            overflow: hidden
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 13px
+        }
+
+        button {
+            cursor: pointer;
+            border: none;
+            font-family: inherit;
+            font-size: inherit
+        }
+
+        input,
+        textarea,
+        select {
+            font-family: inherit;
+            font-size: inherit
+        }
+
+        a {
+            color: var(--accent2);
+            text-decoration: none
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--s3);
+            border-radius: 3px
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #484f58
+        }
+
+        /* ── LAYOUT ── */
+        #root {
+            display: flex;
+            flex-direction: column
+        }
+
+        .app {
+            display: flex;
+            height: 100vh;
+            overflow: hidden
+        }
+
+        /* ── SIDEBAR ── */
+        .sidebar {
+            width: 200px;
+            min-width: 200px;
+            background: var(--s1);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .logo {
+            padding: 16px 14px 12px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: var(--r6);
+            background: linear-gradient(135deg, var(--accent), #6d28d9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .logo-text h1 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.2
+        }
+
+        .logo-text span {
+            font-size: 10px;
+            color: var(--text3)
+        }
+
+        .nav {
+            flex: 1;
+            padding: 8px 6px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1px
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            border-radius: var(--r6);
+            font-size: 12.5px;
+            color: var(--text2);
+            cursor: pointer;
+            transition: all .12s;
+            position: relative;
+        }
+
+        .nav-item:hover {
+            background: var(--s2);
+            color: var(--text)
+        }
+
+        .nav-item.active {
+            background: rgba(124, 58, 237, 0.15);
+            color: var(--accent2)
+        }
+
+        .nav-item .ni {
+            font-size: 14px;
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--red);
+            color: #fff;
+            border-radius: 99px;
+            font-size: 10px;
+            padding: 1px 5px;
+            font-weight: 700;
+            min-width: 18px;
+            text-align: center;
+        }
+
+        .nav-badge.yellow {
+            background: var(--yellow);
+            color: #000
+        }
+
+        .nav-section {
+            font-size: 10px;
+            color: var(--text3);
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            padding: 10px 10px 4px;
+            font-weight: 600
+        }
+
+        .sidebar-footer {
+            padding: 10px 12px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text3);
+        }
+
+        .ws-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            flex-shrink: 0
+        }
+
+        .ws-dot.off {
+            background: var(--red)
+        }
+
+        .ws-dot.pulse {
+            animation: pulse 2s infinite
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .4
+            }
+        }
+
+        /* ── MAIN ── */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden
+        }
+
+        .topbar {
+            padding: 11px 18px;
+            border-bottom: 1px solid var(--border);
+            background: var(--s1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .topbar-title {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        .topbar-sub {
+            font-size: 11px;
+            color: var(--text3)
+        }
+
+        .topbar-right {
+            margin-left: auto;
+            display: flex;
+            gap: 6px;
+            align-items: center
+        }
+
+        .content {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column
+        }
+
+        /* ── BUTTONS ── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 12px;
+            border-radius: var(--r6);
+            font-size: 12px;
+            font-weight: 500;
+            transition: all .12s;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff
+        }
+
+        .btn-primary:hover {
+            background: #6d28d9
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text2);
+            border: 1px solid var(--border)
+        }
+
+        .btn-ghost:hover {
+            background: var(--s2);
+            color: var(--text)
+        }
+
+        .btn-green {
+            background: #166534;
+            color: var(--green)
+        }
+
+        .btn-green:hover {
+            background: #14532d
+        }
+
+        .btn-red {
+            background: #7f1d1d;
+            color: var(--red)
+        }
+
+        .btn-red:hover {
+            background: #450a0a
+        }
+
+        .btn-yellow {
+            background: #78350f;
+            color: var(--yellow)
+        }
+
+        .btn-yellow:hover {
+            background: #92400e
+        }
+
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 11px
+        }
+
+        .btn:disabled {
+            opacity: .4;
+            cursor: not-allowed
+        }
+
+        .btn-icon {
+            padding: 6px;
+            border-radius: var(--r6);
+            background: transparent;
+            color: var(--text2)
+        }
+
+        .btn-icon:hover {
+            background: var(--s2);
+            color: var(--text)
+        }
+
+        /* ── CARDS ── */
+        .card {
+            background: var(--s2);
+            border: 1px solid var(--border);
+            border-radius: var(--r8);
+            padding: 14px
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px
+        }
+
+        .card-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: .05em
+        }
+
+        /* ── BADGES ── */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 7px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 500
+        }
+
+        .badge-green {
+            background: rgba(34, 197, 94, .15);
+            color: var(--green)
+        }
+
+        .badge-red {
+            background: rgba(239, 68, 68, .15);
+            color: var(--red)
+        }
+
+        .badge-yellow {
+            background: rgba(245, 158, 11, .15);
+            color: var(--yellow)
+        }
+
+        .badge-blue {
+            background: rgba(59, 130, 246, .15);
+            color: var(--blue)
+        }
+
+        .badge-purple {
+            background: rgba(124, 58, 237, .15);
+            color: var(--accent2)
+        }
+
+        .badge-gray {
+            background: var(--s3);
+            color: var(--text2)
+        }
+
+        /* ── INPUTS ── */
+        .input {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r6);
+            padding: 7px 10px;
+            color: var(--text);
+            outline: none;
+            transition: border .12s;
+        }
+
+        .input:focus {
+            border-color: var(--accent)
+        }
+
+        .input::placeholder {
+            color: var(--text3)
+        }
+
+        .textarea {
+            resize: none;
+            line-height: 1.5;
+            min-height: 60px
+        }
+
+        .label {
+            display: block;
+            font-size: 11px;
+            color: var(--text2);
+            margin-bottom: 4px;
+            font-weight: 500
+        }
+
+        .field {
+            margin-bottom: 10px
+        }
+
+        .select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r6);
+            padding: 7px 10px;
+            color: var(--text);
+            outline: none;
+            cursor: pointer;
+        }
+
+        /* ── TOAST ── */
+        .toast-wrap {
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            pointer-events: none
+        }
+
+        .toast {
+            background: var(--s2);
+            border: 1px solid var(--border);
+            border-radius: var(--r8);
+            padding: 10px 14px;
+            font-size: 12px;
+            max-width: 320px;
+            animation: toastIn .2s ease;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            pointer-events: auto;
+        }
+
+        .toast.green {
+            border-color: var(--green);
+            color: var(--green)
+        }
+
+        .toast.red {
+            border-color: var(--red);
+            color: var(--red)
+        }
+
+        .toast.yellow {
+            border-color: var(--yellow);
+            color: var(--yellow)
+        }
+
+        @keyframes toastIn {
+            from {
+                opacity: 0;
+                transform: translateY(-8px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        /* ── CHAT ── */
+        .chat-wrap {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden
+        }
+
+        .chat-msgs {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px
+        }
+
+        .msg {
+            display: flex;
+            gap: 10px;
+            max-width: 100%
+        }
+
+        .msg.user {
+            flex-direction: row-reverse
+        }
+
+        .msg-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        }
+
+        .msg.user .msg-avatar {
+            background: var(--accent);
+            color: #fff
+        }
+
+        .msg.assistant .msg-avatar {
+            background: var(--s3);
+            color: var(--text2)
+        }
+
+        .msg-body {
+            max-width: 80%;
+            display: flex;
+            flex-direction: column;
+            gap: 6px
+        }
+
+        .msg.user .msg-body {
+            align-items: flex-end
+        }
+
+        .msg-bubble {
+            background: var(--s2);
+            border: 1px solid var(--border);
+            border-radius: var(--r12);
+            padding: 10px 13px;
+            line-height: 1.6;
+            font-size: 13px;
+        }
+
+        .msg.user .msg-bubble {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff
+        }
+
+        .msg-meta {
+            font-size: 10px;
+            color: var(--text3);
+            display: flex;
+            align-items: center;
+            gap: 6px
+        }
+
+        /* result card inside message */
+        .result-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r8);
+            overflow: hidden;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        .result-header {
+            background: var(--s2);
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .result-title {
+            font-size: 12px;
+            font-weight: 600
+        }
+
+        .sql-block {
+            background: #0d1117;
+            padding: 10px 12px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            color: #79c0ff;
+            line-height: 1.6;
+            overflow-x: auto;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table-wrap {
+            overflow-x: auto;
+            max-height: 200px;
+            overflow-y: auto
+        }
+
+        table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px
+        }
+
+        table.data-table th {
+            background: var(--s2);
+            padding: 6px 10px;
+            text-align: left;
+            font-size: 10px;
+            color: var(--text2);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            white-space: nowrap;
+        }
+
+        table.data-table td {
+            padding: 5px 10px;
+            border-bottom: 1px solid var(--s3);
+            color: var(--text);
+            white-space: nowrap;
+        }
+
+        table.data-table tr:last-child td {
+            border-bottom: none
+        }
+
+        table.data-table tr:hover td {
+            background: var(--s2)
+        }
+
+        .result-footer {
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .fb-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: var(--r6);
+            padding: 3px 8px;
+            font-size: 12px;
+            color: var(--text2);
+            transition: all .12s;
+        }
+
+        .fb-btn:hover {
+            background: var(--s2);
+            color: var(--text)
+        }
+
+        .fb-btn.active {
+            background: rgba(34, 197, 94, .15);
+            border-color: var(--green);
+            color: var(--green)
+        }
+
+        /* conflict card */
+        .conflict-card {
+            background: rgba(245, 158, 11, .07);
+            border: 1px solid rgba(245, 158, 11, .3);
+            border-radius: var(--r8);
+            padding: 12px;
+            max-width: 480px;
+        }
+
+        .conflict-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--yellow);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .conflict-row {
+            font-size: 12px;
+            color: var(--text2);
+            margin-bottom: 4px;
+            line-height: 1.5
+        }
+
+        .conflict-row strong {
+            color: var(--text)
+        }
+
+        .conflict-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+            flex-wrap: wrap
+        }
+
+        /* chat input */
+        .chat-input-wrap {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border);
+            background: var(--s1);
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .chat-input {
+            flex: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r8);
+            padding: 9px 12px;
+            color: var(--text);
+            resize: none;
+            outline: none;
+            max-height: 120px;
+            line-height: 1.5;
+            transition: border .12s;
+        }
+
+        .chat-input:focus {
+            border-color: var(--accent)
+        }
+
+        .chat-input::placeholder {
+            color: var(--text3)
+        }
+
+        .send-btn {
+            background: var(--accent);
+            color: #fff;
+            border-radius: var(--r8);
+            padding: 9px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            flex-shrink: 0;
+            transition: background .12s;
+        }
+
+        .send-btn:hover {
+            background: #6d28d9
+        }
+
+        .send-btn:disabled {
+            opacity: .4
+        }
+
+        .typing-dot {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+            padding: 10px 14px
+        }
+
+        .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent2);
+            animation: blink 1.4s infinite
+        }
+
+        .dot:nth-child(2) {
+            animation-delay: .2s
+        }
+
+        .dot:nth-child(3) {
+            animation-delay: .4s
+        }
+
+        @keyframes blink {
+
+            0%,
+            80%,
+            100% {
+                opacity: .3
+            }
+
+            40% {
+                opacity: 1
+            }
+        }
+
+        /* ── DEFINITIONS PANEL ── */
+        .panel-wrap {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px
+        }
+
+        .def-card {
+            background: var(--s2);
+            border: 1px solid var(--border);
+            border-radius: var(--r8);
+            padding: 12px;
+            transition: border-color .12s;
+        }
+
+        .def-card:hover {
+            border-color: var(--s3)
+        }
+
+        .def-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px
+        }
+
+        .def-name {
+            font-size: 13px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            color: var(--accent2)
+        }
+
+        .def-ver {
+            font-size: 10px;
+            color: var(--text3);
+            margin-left: auto
+        }
+
+        .def-desc {
+            font-size: 12px;
+            color: var(--text2);
+            line-height: 1.5;
+            margin-bottom: 8px
+        }
+
+        .def-sql {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r6);
+            padding: 7px 10px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            color: #79c0ff;
+            margin-bottom: 8px;
+            overflow-x: auto;
+            line-height: 1.5;
+        }
+
+        .def-tags {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-bottom: 8px
+        }
+
+        .def-tag {
+            background: var(--s3);
+            color: var(--text2);
+            border-radius: 99px;
+            padding: 2px 7px;
+            font-size: 10px;
+        }
+
+        .def-actions {
+            display: flex;
+            gap: 5px
+        }
+
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: var(--text3);
+            padding: 40px;
+            text-align: center;
+        }
+
+        .empty-icon {
+            font-size: 32px;
+            opacity: .5
+        }
+
+        .empty-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text2)
+        }
+
+        .empty-sub {
+            font-size: 12px;
+            line-height: 1.5
+        }
+
+        /* ── ADD DEFINITION MODAL ── */
+        .modal-bg {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(2px);
+        }
+
+        .modal {
+            background: var(--s1);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            width: 480px;
+            max-width: calc(100vw - 32px);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-title {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 14px
+        }
+
+        /* ── HITL PANEL ── */
+        .hitl-card {
+            background: var(--s2);
+            border: 1px solid rgba(245, 158, 11, .3);
+            border-radius: var(--r8);
+            padding: 14px;
+        }
+
+        .hitl-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px
+        }
+
+        .hitl-sim {
+            margin-left: auto;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 99px;
+        }
+
+        .hitl-sim.high {
+            background: rgba(239, 68, 68, .2);
+            color: var(--red)
+        }
+
+        .hitl-sim.med {
+            background: rgba(245, 158, 11, .2);
+            color: var(--yellow)
+        }
+
+        .sim-bar-wrap {
+            background: var(--s3);
+            border-radius: 99px;
+            height: 4px;
+            margin: 8px 0
+        }
+
+        .sim-bar {
+            height: 4px;
+            border-radius: 99px;
+            background: var(--yellow)
+        }
+
+        .hitl-q {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r6);
+            padding: 8px 10px;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+
+        .hitl-label {
+            font-size: 10px;
+            color: var(--text3);
+            margin-bottom: 3px;
+            text-transform: uppercase;
+            letter-spacing: .04em
+        }
+
+        .hitl-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+            flex-wrap: wrap
+        }
+
+        .merge-input-wrap {
+            margin-top: 8px
+        }
+
+        /* ── STATS PANEL ── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px
+        }
+
+        .stat-card {
+            background: var(--s2);
+            border: 1px solid var(--border);
+            border-radius: var(--r8);
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-val {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text)
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text2)
+        }
+
+        .stat-sub {
+            font-size: 10px;
+            color: var(--text3)
+        }
+
+        .usage-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .usage-row:last-child {
+            border-bottom: none
+        }
+
+        .usage-bar-wrap {
+            flex: 1;
+            background: var(--s3);
+            border-radius: 99px;
+            height: 4px
+        }
+
+        .usage-bar {
+            height: 4px;
+            border-radius: 99px
+        }
+
+        /* ── DRIFT PANEL ── */
+        .drift-card {
+            background: rgba(245, 158, 11, .07);
+            border: 1px solid rgba(245, 158, 11, .25);
+            border-radius: var(--r8);
+            padding: 12px;
+        }
+
+        .drift-removed {
+            background: rgba(239, 68, 68, .07);
+            border-color: rgba(239, 68, 68, .25)
+        }
+
+        .drift-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            font-weight: 600
+        }
+
+        .drift-detail {
+            font-size: 11px;
+            color: var(--text2);
+            line-height: 1.5
+        }
+
+        .drift-affects {
+            margin-top: 6px;
+            padding: 6px 8px;
+            background: var(--bg);
+            border-radius: var(--r6);
+            font-size: 11px;
+            color: var(--red);
+        }
+
+        /* ── HISTORY PANEL ── */
+        .history-row {
+            background: var(--s2);
+            border: 1px solid var(--border);
+            border-radius: var(--r8);
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .history-q {
+            flex: 1;
+            font-size: 12px;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .history-meta {
+            font-size: 11px;
+            color: var(--text3);
+            white-space: nowrap;
+            flex-shrink: 0
+        }
+
+        .history-status {
+            flex-shrink: 0
+        }
+
+        .provider-chip {
+            background: var(--s3);
+            color: var(--text2);
+            border-radius: 99px;
+            padding: 2px 7px;
+            font-size: 10px;
+            font-family: monospace;
+        }
+
+        /* ── TABS inside panel ── */
+        .tab-bar {
+            display: flex;
+            gap: 2px;
+            padding: 0 16px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0
+        }
+
+        .tab-btn {
+            padding: 9px 14px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text2);
+            border-bottom: 2px solid transparent;
+            background: transparent;
+            margin-bottom: -1px;
+            transition: all .12s;
+        }
+
+        .tab-btn.active {
+            color: var(--accent2);
+            border-bottom-color: var(--accent)
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: var(--text)
+        }
+
+        /* ── SEARCH BAR ── */
+        .search-wrap {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0
+        }
+
+        .search-input {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--r6);
+            padding: 7px 10px 7px 32px;
+            color: var(--text);
+            outline: none;
+            font-size: 12px;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent)
+        }
+
+        .search-wrap {
+            position: relative
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 26px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text3);
+            font-size: 13px;
+            pointer-events: none
+        }
+
+        /* ── SCROLLABLE PANEL BODY ── */
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px
+        }
+
+        .panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0
+        }
+
+        .panel-title {
+            font-size: 13px;
+            font-weight: 600
+        }
+
+        .panel-sub {
+            font-size: 11px;
+            color: var(--text3)
+        }
+
+        .panel-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 6px
+        }
+
+        /* ── RIGHT PANEL ── */
+        .right-panel {
+            width: 280px;
+            min-width: 280px;
+            background: var(--s1);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .rp-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border)
+        }
+
+        .rp-tab {
+            flex: 1;
+            padding: 9px;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text2);
+            cursor: pointer;
+            transition: .12s;
+            border-bottom: 2px solid transparent;
+        }
+
+        .rp-tab.active {
+            color: var(--accent2);
+            border-bottom-color: var(--accent)
+        }
+
+        .rp-tab:hover:not(.active) {
+            color: var(--text);
+            background: var(--s2)
+        }
+
+        .rp-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px
+        }
+
+        /* ── QUICK ACTIONS ── */
+        .quick-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--s2);
+            border: 1px solid var(--border);
+            border-radius: var(--r6);
+            padding: 5px 10px;
+            font-size: 11px;
+            color: var(--text2);
+            cursor: pointer;
+            transition: all .12s;
+        }
+
+        .quick-chip:hover {
+            border-color: var(--accent);
+            color: var(--accent2)
+        }
+
+        /* ── SKELETON LOADER ── */
+        .skel {
+            background: var(--s3);
+            border-radius: var(--r6);
+            animation: shimmer 1.5s infinite
+        }
+
+        @keyframes shimmer {
+            0% {
+                opacity: .5
+            }
+
+            50% {
+                opacity: 1
+            }
+
+            100% {
+                opacity: .5
+            }
+        }
+
+        /* ── SPLIT VIEW ── */
+        .split {
+            display: flex;
+            height: 100%;
+            overflow: hidden
+        }
+
+        .split-left {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-right: 1px solid var(--border)
+        }
+
+        .split-right {
+            width: 300px;
+            min-width: 300px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+    <div id="toast-root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+        // ── CONFIG ──────────────────────────────────────────────────────
+        const API = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+            ? `http://${window.location.host}` : "";
+        const ADMIN_TOKEN = localStorage.getItem("dd_token") || "dd-dev-token-change-in-prod";
+        const SESSION_ID = (() => {
+            let s = localStorage.getItem("dd_session");
+            if (!s) { s = Math.random().toString(36).slice(2); localStorage.setItem("dd_session", s); }
+            return s;
+        })();
+
+        // ── API FETCH ────────────────────────────────────────────────────
+        async function apiFetch(path, opts = {}) {
+            const headers = { "Content-Type": "application/json", "X-API-Key": ADMIN_TOKEN, ...(opts.headers || {}) };
+            const res = await fetch(API + path, { ...opts, headers });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ detail: res.statusText }));
+                throw new Error(err.detail || res.statusText);
+            }
+            return res.json();
+        }
+
+        // ── TOAST ─────────────────────────────────────────────────────────
+        let toastSetFn = null;
+        function toast(msg, type = "green") {
+            if (toastSetFn) toastSetFn(prev => [...prev, { id: Date.now() + Math.random(), msg, type }]);
+        }
+        function ToastHost() {
+            const [toasts, setToasts] = useState([]);
+            toastSetFn = setToasts;
+            useEffect(() => {
+                if (!toasts.length) return;
+                const t = setTimeout(() => setToasts(p => p.slice(1)), 3000);
+                return () => clearTimeout(t);
+            }, [toasts]);
+            return ReactDOM.createPortal(
+                <div className="toast-wrap">
+                    {toasts.map(t => (
+                        <div key={t.id} className={`toast ${t.type}`}>
+                            {t.type === "green" ? "✓" : t.type === "red" ? "✕" : "⚠"} {t.msg}
+                        </div>
+                    ))}
+                </div>,
+                document.getElementById("toast-root")
+            );
+        }
+
+        // ── HELPERS ───────────────────────────────────────────────────────
+        function fmt(dt) {
+            if (!dt) return "";
+            const d = new Date(dt + (dt.endsWith("Z") ? "" : "Z"));
+            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+        function fmtDate(dt) {
+            if (!dt) return "";
+            return new Date(dt + (dt.endsWith("Z") ? "" : "Z")).toLocaleDateString([], { month: "short", day: "numeric" });
+        }
+        function truncate(s, n = 80) { return s && s.length > n ? s.slice(0, n) + "…" : s; }
+
+        // ── TYPING INDICATOR ──────────────────────────────────────────────
+        function Typing() {
+            return (
+                <div className="msg assistant">
+                    <div className="msg-avatar">⬡</div>
+                    <div className="msg-body">
+                        <div className="msg-bubble" style={{ padding: "10px 14px" }}>
+                            <div className="typing-dot">
+                                <div className="dot" /><div className="dot" /><div className="dot" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── SQL BLOCK ─────────────────────────────────────────────────────
+        function SqlResult({ result, queryId, onFeedback }) {
+            const [fb, setFb] = useState(null);
+            const rows = result?.query_result?.rows || [];
+            const cols = rows.length ? Object.keys(rows[0]) : [];
+            const err = result?.query_result?.error;
+
+            function doFeedback(v) {
+                setFb(v);
+                onFeedback && onFeedback(queryId, v);
+                toast(v === 1 ? "👍 Marked as correct" : "👎 Feedback saved", v === 1 ? "green" : "yellow");
+            }
+
+            return (
+                <div className="result-card">
+                    <div className="result-header">
+                        <span className="result-title">
+                            {result?.confidence === "high" ? "✅" : result?.confidence === "medium" ? "⚠️" : "❓"} Result
+                        </span>
+                        <span className={`badge badge-${result?.confidence === "high" ? "green" : result?.confidence === "medium" ? "yellow" : "gray"}`}>
+                            {result?.confidence || "—"}
+                        </span>
+                        {result?.provider_used && (
+                            <span className="provider-chip">{result.provider_used}</span>
+                        )}
+                        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text3)" }}>
+                            {result?.definitions_injected || 0} defs injected
+                        </span>
+                    </div>
+
+                    {result?.explanation && (
+                        <div style={{ padding: "8px 12px", fontSize: 12, color: "var(--text2)", borderBottom: "1px solid var(--border)" }}>
+                            {result.explanation}
+                        </div>
+                    )}
+
+                    {result?.sql && (
+                        <div className="sql-block">{result.sql}</div>
+                    )}
+
+                    {err && (
+                        <div style={{ padding: "8px 12px", color: "var(--red)", fontSize: 12, borderBottom: "1px solid var(--border)" }}>
+                            ⚠ SQL Error: {err}
+                        </div>
+                    )}
+
+                    {rows.length > 0 && (
+                        <div className="data-table-wrap">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>{cols.map(c => <th key={c}>{c}</th>)}</tr>
+                                </thead>
+                                <tbody>
+                                    {rows.map((row, i) => (
+                                        <tr key={i}>{cols.map(c => <td key={c}>{String(row[c] ?? "")}</td>)}</tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {result?.warning && (
+                        <div style={{ padding: "6px 12px", fontSize: 11, color: "var(--yellow)", borderTop: "1px solid var(--border)" }}>
+                            ⚠ {result.warning}
+                        </div>
+                    )}
+
+                    <div className="result-footer">
+                        <span style={{ fontSize: 11, color: "var(--text3)" }}>
+                            {rows.length > 0 ? `${rows.length} row${rows.length !== 1 ? "s" : ""}` : result?.sql ? "Query ready" : ""}
+                        </span>
+                        <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
+                            <button className={`fb-btn ${fb === 1 ? "active" : ""}`} onClick={() => doFeedback(1)}>👍</button>
+                            <button className={`fb-btn ${fb === -1 ? "active" : ""}`} onClick={() => doFeedback(-1)}>👎</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── CONFLICT CARD IN CHAT ─────────────────────────────────────────
+        function ConflictCard({ conflict, conflictId, onAction }) {
+            const [mergeText, setMergeText] = useState("");
+            const [showMerge, setShowMerge] = useState(false);
+
+            async function act(action) {
+                try {
+                    await apiFetch("/api/hitl/resolve", {
+                        method: "POST", body: JSON.stringify({
+                            conflict_id: conflictId,
+                            action,
+                            merged_definition: action === "merge" ? mergeText : undefined
+                        })
+                    });
+                    toast(`Conflict resolved (${action})`, "green");
+                    onAction && onAction();
+                } catch (e) { toast(e.message, "red"); }
+            }
+
+            return (
+                <div className="conflict-card">
+                    <div className="conflict-title">⚠️ Definition Conflict Detected</div>
+                    <div className="conflict-row">
+                        <strong>Your question</strong> is {Math.round((conflict.similarity || 0) * 100)}% similar to an existing definition.
+                    </div>
+                    <div className="sim-bar-wrap">
+                        <div className="sim-bar" style={{ width: `${Math.round((conflict.similarity || 0) * 100)}%` }} />
+                    </div>
+                    <div style={{ marginBottom: 4 }}>
+                        <div className="conflict-row" style={{ fontSize: 11, color: "var(--text3)" }}>Matched definition</div>
+                        <div className="conflict-row">
+                            <strong>{conflict.matched_definition}</strong>: {conflict.message?.split('"')[1] || ""}
+                        </div>
+                    </div>
+                    {showMerge && (
+                        <div className="merge-input-wrap">
+                            <div className="label">Merged canonical definition</div>
+                            <textarea
+                                className="input textarea"
+                                value={mergeText}
+                                onChange={e => setMergeText(e.target.value)}
+                                placeholder="Write the canonical definition that replaces both..."
+                            />
+                        </div>
+                    )}
+                    <div className="conflict-actions">
+                        <button className="btn btn-green btn-sm" onClick={() => act("approve_b")}>Keep existing</button>
+                        <button className="btn btn-yellow btn-sm" onClick={() => { setShowMerge(s => !s) }}>
+                            {showMerge ? "Cancel" : "Merge"}
+                        </button>
+                        {showMerge && mergeText && (
+                            <button className="btn btn-primary btn-sm" onClick={() => act("merge")}>Save merge</button>
+                        )}
+                        <button className="btn btn-ghost btn-sm" onClick={() => act("approve_a")}>Create new def</button>
+                        <button className="btn btn-red btn-sm" onClick={() => act("reject")}>Reject</button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── MESSAGE ───────────────────────────────────────────────────────
+        function Message({ msg, onConflictAction, onFeedback }) {
+            return (
+                <div className={`msg ${msg.role}`}>
+                    <div className="msg-avatar">{msg.role === "user" ? "U" : "⬡"}</div>
+                    <div className="msg-body">
+                        {msg.text && (
+                            <div className="msg-bubble">{msg.text}</div>
+                        )}
+                        {msg.data?.status === "conflict_detected" && (
+                            <ConflictCard
+                                conflict={msg.data}
+                                conflictId={msg.data.conflict_id}
+                                onAction={onConflictAction}
+                            />
+                        )}
+                        {msg.data?.status === "ok" && msg.data?.sql_result && (
+                            <SqlResult
+                                result={msg.data.sql_result}
+                                queryId={msg.data.query_id}
+                                onFeedback={onFeedback}
+                            />
+                        )}
+                        <div className="msg-meta">
+                            <span>{fmt(msg.ts)}</span>
+                            {msg.latency && <span>· {msg.latency}ms</span>}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── WELCOME SCREEN ────────────────────────────────────────────────
+        function Welcome({ onQuick }) {
+            const EXAMPLES = [
+                "What is total net revenue for 2008?",
+                "How many units were returned online?",
+                "Show gross margin percentage by product category",
+                "What is the return rate across all channels?",
+                "Which store had the highest sales in Q3?",
+                "Compare online vs store sales volume",
+            ];
+            return (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24 }}>
+                    <div style={{ fontSize: 32 }}>⬡</div>
+                    <div style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>DefinitionDrift</div>
+                        <div style={{ fontSize: 12, color: "var(--text3)", maxWidth: 360, lineHeight: 1.6 }}>
+                            Talk to your Contoso Retail data with governed metric definitions.
+                            Same question → same answer, every time.
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxWidth: 500, justifyContent: "center" }}>
+                        {EXAMPLES.map(q => (
+                            <button key={q} className="quick-chip" onClick={() => onQuick(q)}>{q}</button>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        // ── CHAT PANEL ────────────────────────────────────────────────────
+        function ChatPanel({ wsConn, onStatsChange }) {
+            const [msgs, setMsgs] = useState([]);
+            const [input, setInput] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [runQuery, setRunQuery] = useState(true);
+            const bottomRef = useRef(null);
+            const inputRef = useRef(null);
+
+            useEffect(() => {
+                bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+            }, [msgs, loading]);
+
+            const addMsg = (role, text, data = {}, latency = null) => {
+                setMsgs(p => [...p, { id: Date.now() + Math.random(), role, text, data, ts: new Date().toISOString(), latency }]);
+            };
+
+            async function send(q) {
+                const question = q || input.trim();
+                if (!question || loading) return;
+                setInput("");
+                addMsg("user", question);
+                setLoading(true);
+                const t0 = Date.now();
+                try {
+                    const data = await apiFetch("/api/query", {
+                        method: "POST",
+                        body: JSON.stringify({ question, run_query: runQuery, session_id: SESSION_ID })
+                    });
+                    const lat = Date.now() - t0;
+                    if (data.status === "conflict_detected") {
+                        addMsg("assistant", "⚠️ I detected a potential conflict with an existing definition. Please review:", data, lat);
+                    } else if (data.status === "ok") {
+                        const sr = data.sql_result;
+                        const rows = sr?.query_result?.rows?.length;
+                        addMsg("assistant",
+                            rows ? `Found ${rows} row${rows !== 1 ? "s" : ""}.` : sr?.sql ? "Query generated." : sr?.explanation || "Done.",
+                            data, lat);
+                    } else {
+                        addMsg("assistant", `Error: ${data.error || "Unknown error"}`, data, lat);
+                    }
+                    onStatsChange && onStatsChange();
+                } catch (e) {
+                    addMsg("assistant", `Error: ${e.message}`);
+                    toast(e.message, "red");
+                } finally { setLoading(false); }
+            }
+
+            function handleKey(e) {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+            }
+
+            async function handleFeedback(queryId, rating) {
+                try {
+                    await apiFetch("/api/feedback", { method: "POST", body: JSON.stringify({ query_id: queryId, rating }) });
+                } catch (e) { }
+            }
+
+            return (
+                <div className="chat-wrap">
+                    <div className="chat-msgs">
+                        {msgs.length === 0 ? (
+                            <Welcome onQuick={(q) => { setInput(q); send(q) }} />
+                        ) : (
+                            msgs.map(m => (
+                                <Message key={m.id} msg={m}
+                                    onConflictAction={() => onStatsChange && onStatsChange()}
+                                    onFeedback={handleFeedback}
+                                />
+                            ))
+                        )}
+                        {loading && <Typing />}
+                        <div ref={bottomRef} />
+                    </div>
+
+                    <div className="chat-input-wrap">
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <textarea
+                                ref={inputRef}
+                                className="chat-input"
+                                rows={1}
+                                value={input}
+                                onChange={e => setInput(e.target.value)}
+                                onKeyDown={handleKey}
+                                placeholder="Ask about your Contoso data…"
+                            />
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text3)", cursor: "pointer" }}>
+                                    <input type="checkbox" checked={runQuery} onChange={e => setRunQuery(e.target.checked)}
+                                        style={{ accentColor: "var(--accent)" }} />
+                                    Execute SQL
+                                </label>
+                                <span style={{ fontSize: 11, color: "var(--text3)" }}>
+                                    {wsConn ? "🟢 Live" : "🔴 Offline"}
+                                </span>
+                            </div>
+                        </div>
+                        <button className="send-btn" onClick={() => send()} disabled={loading || !input.trim()}>
+                            {loading ? "…" : "Send ↑"}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── DEFINITIONS PANEL ─────────────────────────────────────────────
+        function DefinitionsPanel({ refreshKey }) {
+            const [defs, setDefs] = useState([]);
+            const [search, setSearch] = useState("");
+            const [approvedOnly, setApprovedOnly] = useState(false);
+            const [loading, setLoading] = useState(true);
+            const [showAdd, setShowAdd] = useState(false);
+            const [form, setForm] = useState({ name: "", description: "", sql_expr: "", tags: "", approved: false });
+            const [saving, setSaving] = useState(false);
+            const [expanded, setExpanded] = useState(null);
+
+            async function load() {
+                setLoading(true);
+                try {
+                    const d = await apiFetch(`/api/definitions?approved_only=${approvedOnly}`);
+                    setDefs(d.definitions || []);
+                } catch (e) { toast(e.message, "red"); }
+                finally { setLoading(false); }
+            }
+
+            useEffect(() => { load(); }, [refreshKey, approvedOnly]);
+
+            const filtered = useMemo(() =>
+                defs.filter(d =>
+                    !search || d.name.toLowerCase().includes(search.toLowerCase()) ||
+                    d.description.toLowerCase().includes(search.toLowerCase())
+                ), [defs, search]);
+
+            async function saveDefinition() {
+                if (!form.name || !form.description) { toast("Name and description required", "yellow"); return; }
+                setSaving(true);
+                try {
+                    await apiFetch("/api/definitions", {
+                        method: "POST", body: JSON.stringify({
+                            ...form, tags: form.tags.split(",").map(t => t.trim()).filter(Boolean)
+                        })
+                    });
+                    toast("Definition saved", "green");
+                    setShowAdd(false);
+                    setForm({ name: "", description: "", sql_expr: "", tags: "", approved: false });
+                    load();
+                } catch (e) { toast(e.message, "red"); }
+                finally { setSaving(false); }
+            }
+
+            async function deleteDef(name) {
+                if (!confirm(`Unapprove "${name}"?`)) return;
+                try {
+                    await apiFetch(`/api/definitions/${name}`, { method: "DELETE" });
+                    toast("Definition unapproved", "yellow");
+                    load();
+                } catch (e) { toast(e.message, "red"); }
+            }
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                    {/* toolbar */}
+                    <div className="panel-header">
+                        <div>
+                            <div className="panel-title">Metric Definitions</div>
+                            <div className="panel-sub">{filtered.length} of {defs.length} definitions</div>
+                        </div>
+                        <div className="panel-actions">
+                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text2)", cursor: "pointer" }}>
+                                <input type="checkbox" checked={approvedOnly} onChange={e => setApprovedOnly(e.target.checked)}
+                                    style={{ accentColor: "var(--accent)" }} />
+                                Approved only
+                            </label>
+                            <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>
+                        </div>
+                    </div>
+
+                    {/* search */}
+                    <div className="search-wrap" style={{ position: "relative", padding: "8px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+                        <span className="search-icon" style={{ left: 26 }}>🔍</span>
+                        <input
+                            className="search-input"
+                            placeholder="Search definitions…"
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                        />
+                    </div>
+
+                    {/* list */}
+                    <div className="panel-body">
+                        {loading ? (
+                            [1, 2, 3].map(i => (
+                                <div key={i} style={{ background: "var(--s2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
+                                    <div className="skel" style={{ height: 12, width: "40%", marginBottom: 8 }} />
+                                    <div className="skel" style={{ height: 10, width: "80%", marginBottom: 6 }} />
+                                    <div className="skel" style={{ height: 10, width: "60%" }} />
+                                </div>
+                            ))
+                        ) : filtered.length === 0 ? (
+                            <div className="empty-state">
+                                <div className="empty-icon">📋</div>
+                                <div className="empty-title">No definitions found</div>
+                                <div className="empty-sub">{search ? "Try a different search" : "Add your first metric definition"}</div>
+                                <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add definition</button>
+                            </div>
+                        ) : (
+                            filtered.map(d => (
+                                <div key={d.id} className="def-card">
+                                    <div className="def-head">
+                                        <span className="def-name">{d.name}</span>
+                                        <span className={`badge ${d.approved ? "badge-green" : "badge-yellow"}`}>
+                                            {d.approved ? "✓ approved" : "⏳ pending"}
+                                        </span>
+                                        <span className="def-ver">v{d.version}</span>
+                                    </div>
+                                    <div className="def-desc">{d.description}</div>
+                                    {expanded === d.id && d.sql_expr && (
+                                        <div className="def-sql">{d.sql_expr}</div>
+                                    )}
+                                    {d.tags?.length > 0 && (
+                                        <div className="def-tags">
+                                            {d.tags.map(t => <span key={t} className="def-tag">{t}</span>)}
+                                        </div>
+                                    )}
+                                    <div className="def-actions">
+                                        {d.sql_expr && (
+                                            <button className="btn btn-ghost btn-sm" onClick={() => setExpanded(p => p === d.id ? null : d.id)}>
+                                                {expanded === d.id ? "Hide SQL" : "View SQL"}
+                                            </button>
+                                        )}
+                                        <button className="btn btn-red btn-sm" onClick={() => deleteDef(d.name)}>Unapprove</button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    {/* add modal */}
+                    {showAdd && (
+                        <div className="modal-bg" onClick={e => { if (e.target === e.currentTarget) setShowAdd(false) }}>
+                            <div className="modal">
+                                <div className="modal-title">📋 Add Metric Definition</div>
+                                <div className="field">
+                                    <label className="label">Name (snake_case)</label>
+                                    <input className="input" placeholder="e.g. net_revenue"
+                                        value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+                                </div>
+                                <div className="field">
+                                    <label className="label">Description</label>
+                                    <textarea className="input textarea" placeholder="Plain English definition…"
+                                        value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
+                                </div>
+                                <div className="field">
+                                    <label className="label">SQL Expression (optional)</label>
+                                    <textarea className="input textarea" placeholder="SELECT SUM(SalesAmount) FROM FactSales…"
+                                        value={form.sql_expr} onChange={e => setForm(p => ({ ...p, sql_expr: e.target.value }))}
+                                        style={{ fontFamily: "monospace", fontSize: 11 }} />
+                                </div>
+                                <div className="field">
+                                    <label className="label">Tags (comma-separated)</label>
+                                    <input className="input" placeholder="finance, revenue, kpi"
+                                        value={form.tags} onChange={e => setForm(p => ({ ...p, tags: e.target.value }))} />
+                                </div>
+                                <div className="field">
+                                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
+                                        <input type="checkbox" checked={form.approved}
+                                            onChange={e => setForm(p => ({ ...p, approved: e.target.checked }))}
+                                            style={{ accentColor: "var(--accent)" }} />
+                                        Mark as approved immediately
+                                    </label>
+                                </div>
+                                <div className="modal-footer">
+                                    <button className="btn btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+                                    <button className="btn btn-primary" onClick={saveDefinition} disabled={saving}>
+                                        {saving ? "Saving…" : "Save definition"}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ── HITL QUEUE PANEL ─────────────────────────────────────────────
+        function HitlPanel({ refreshKey, onResolved }) {
+            const [conflicts, setConflicts] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [merging, setMerging] = useState({});
+            const [mergeText, setMergeText] = useState({});
+            const [resolving, setResolving] = useState({});
+
+            async function load() {
+                setLoading(true);
+                try {
+                    const d = await apiFetch("/api/hitl/queue");
+                    setConflicts(d.conflicts || []);
+                } catch (e) { toast(e.message, "red"); }
+                finally { setLoading(false); }
+            }
+
+            useEffect(() => { load(); }, [refreshKey]);
+
+            async function resolve(id, action) {
+                setResolving(p => ({ ...p, [id]: true }));
+                try {
+                    await apiFetch("/api/hitl/resolve", {
+                        method: "POST", body: JSON.stringify({
+                            conflict_id: id, action,
+                            merged_definition: action === "merge" ? mergeText[id] : undefined
+                        })
+                    });
+                    toast(`Resolved: ${action}`, "green");
+                    setConflicts(p => p.filter(c => c.id !== id));
+                    onResolved && onResolved();
+                } catch (e) { toast(e.message, "red"); }
+                finally { setResolving(p => ({ ...p, [id]: false })); }
+            }
+
+            const simColor = (s) => {
+                const p = Math.round((s || 0) * 100);
+                return p >= 90 ? "high" : "med";
+            };
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                    <div className="panel-header">
+                        <div>
+                            <div className="panel-title">HITL Queue</div>
+                            <div className="panel-sub">Human-in-the-loop conflict resolution</div>
+                        </div>
+                        <div className="panel-actions">
+                            <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
+                        </div>
+                    </div>
+                    <div className="panel-body">
+                        {loading ? (
+                            <div className="empty-state"><div className="skel" style={{ width: 200, height: 12 }} /></div>
+                        ) : conflicts.length === 0 ? (
+                            <div className="empty-state">
+                                <div className="empty-icon">✅</div>
+                                <div className="empty-title">No pending conflicts</div>
+                                <div className="empty-sub">All metric definitions are consistent. The queue will fill when ambiguous queries are detected.</div>
+                            </div>
+                        ) : (
+                            conflicts.map(c => (
+                                <div key={c.id} className="hitl-card">
+                                    <div className="hitl-head">
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--yellow)" }}>⚠️ Conflict</span>
+                                        <span style={{ fontSize: 10, color: "var(--text3)", fontFamily: "monospace" }}>{c.id.slice(0, 8)}</span>
+                                        <div className={`hitl-sim ${simColor(c.similarity)}`}>
+                                            {Math.round((c.similarity || 0) * 100)}% match
+                                        </div>
+                                    </div>
+
+                                    <div className="sim-bar-wrap">
+                                        <div className="sim-bar" style={{
+                                            width: `${Math.round((c.similarity || 0) * 100)}%`,
+                                            background: (c.similarity || 0) >= 0.9 ? "var(--red)" : "var(--yellow)"
+                                        }} />
+                                    </div>
+
+                                    <div style={{ marginBottom: 6 }}>
+                                        <div className="hitl-label">Incoming question</div>
+                                        <div className="hitl-q">{c.question_a}</div>
+                                    </div>
+
+                                    <div style={{ marginBottom: 6 }}>
+                                        <div className="hitl-label">Matches definition: <strong style={{ color: "var(--accent2)" }}>{c.def_b}</strong></div>
+                                        <div className="hitl-q" style={{ fontSize: 11, color: "var(--text2)" }}>{c.question_b}</div>
+                                    </div>
+
+                                    <div style={{ fontSize: 10, color: "var(--text3)", marginBottom: 8 }}>
+                                        {fmtDate(c.created_at)} · {fmt(c.created_at)}
+                                    </div>
+
+                                    {merging[c.id] && (
+                                        <div style={{ marginBottom: 8 }}>
+                                            <div className="hitl-label">Merged definition text</div>
+                                            <textarea
+                                                className="input textarea"
+                                                style={{ fontSize: 12 }}
+                                                value={mergeText[c.id] || ""}
+                                                onChange={e => setMergeText(p => ({ ...p, [c.id]: e.target.value }))}
+                                                placeholder="Write the canonical merged definition…"
+                                            />
+                                        </div>
+                                    )}
+
+                                    <div className="hitl-actions">
+                                        <button className="btn btn-green btn-sm"
+                                            onClick={() => resolve(c.id, "approve_b")}
+                                            disabled={resolving[c.id]}>
+                                            ✓ Keep existing
+                                        </button>
+                                        <button className="btn btn-yellow btn-sm"
+                                            onClick={() => setMerging(p => ({ ...p, [c.id]: !p[c.id] }))}>
+                                            {merging[c.id] ? "Cancel" : "Merge"}
+                                        </button>
+                                        {merging[c.id] && (
+                                            <button className="btn btn-primary btn-sm"
+                                                onClick={() => resolve(c.id, "merge")}
+                                                disabled={!mergeText[c.id] || resolving[c.id]}>
+                                                Save merge
+                                            </button>
+                                        )}
+                                        <button className="btn btn-ghost btn-sm"
+                                            onClick={() => resolve(c.id, "approve_a")}
+                                            disabled={resolving[c.id]}>
+                                            Create new
+                                        </button>
+                                        <button className="btn btn-red btn-sm"
+                                            onClick={() => resolve(c.id, "reject")}
+                                            disabled={resolving[c.id]}>
+                                            Reject
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ── DRIFT PANEL ───────────────────────────────────────────────────
+        function DriftPanel({ refreshKey }) {
+            const [events, setEvents] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [watching, setWatching] = useState(false);
+
+            async function load() {
+                setLoading(true);
+                try {
+                    const d = await apiFetch("/api/drift");
+                    setEvents(d.events || []);
+                } catch (e) { }
+                finally { setLoading(false); }
+            }
+
+            useEffect(() => { load(); }, [refreshKey]);
+
+            async function triggerWatch() {
+                setWatching(true);
+                try {
+                    const d = await apiFetch("/api/drift/watch", { method: "POST" });
+                    toast(`Drift check: ${d.events_detected} event(s)`, d.events_detected > 0 ? "yellow" : "green");
+                    load();
+                } catch (e) { toast(e.message, "red"); }
+                finally { setWatching(false); }
+            }
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                    <div className="panel-header">
+                        <div>
+                            <div className="panel-title">Schema Drift</div>
+                            <div className="panel-sub">Column-level change detection</div>
+                        </div>
+                        <div className="panel-actions">
+                            <button className="btn btn-ghost btn-sm" onClick={triggerWatch} disabled={watching}>
+                                {watching ? "Checking…" : "Run check"}
+                            </button>
+                        </div>
+                    </div>
+                    <div className="panel-body">
+                        {loading ? (
+                            <div className="empty-state"><div className="skel" style={{ width: 200, height: 12 }} /></div>
+                        ) : events.length === 0 ? (
+                            <div className="empty-state">
+                                <div className="empty-icon">🔍</div>
+                                <div className="empty-title">No drift events</div>
+                                <div className="empty-sub">All schema snapshots match. Run a check to detect new column changes.</div>
+                                <button className="btn btn-ghost btn-sm" onClick={triggerWatch}>Run schema check</button>
+                            </div>
+                        ) : (
+                            events.map((e, i) => (
+                                <div key={i} className={`drift-card ${e.type === "column_removed" ? "drift-removed" : ""}`}>
+                                    <div className="drift-head">
+                                        {e.type === "column_added" ? "➕" : "➖"} {e.type === "column_added" ? "Column Added" : "Column Removed"}
+                                        <span className={`badge ${e.type === "column_added" ? "badge-blue" : "badge-red"}`} style={{ marginLeft: "auto" }}>
+                                            {e.type}
+                                        </span>
+                                    </div>
+                                    <div className="drift-detail">
+                                        Table: <strong>{e.table}</strong> · Column: <strong style={{ fontFamily: "monospace" }}>{e.column}</strong>
+                                    </div>
+                                    <div className="drift-detail" style={{ marginTop: 4 }}>{e.detail}</div>
+                                    {e.affected_definitions && JSON.parse(e.affected_definitions || "[]").length > 0 && (
+                                        <div className="drift-affects">
+                                            ⚠ Breaks definitions: {JSON.parse(e.affected_definitions).join(", ")}
+                                        </div>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ── STATS PANEL ───────────────────────────────────────────────────
+        function StatsPanel({ refreshKey }) {
+            const [stats, setStats] = useState(null);
+
+            async function load() {
+                try { setStats(await apiFetch("/api/stats")); } catch (e) { }
+            }
+
+            useEffect(() => { load(); }, [refreshKey]);
+            useEffect(() => { const t = setInterval(load, 10000); return () => clearInterval(t); }, []);
+
+            if (!stats) return (
+                <div className="panel-body" style={{ padding: 16 }}>
+                    <div className="stats-grid">
+                        {[1, 2, 3, 4].map(i => (
+                            <div key={i} className="stat-card"><div className="skel" style={{ height: 28, width: 60, marginBottom: 6 }} /><div className="skel" style={{ height: 10, width: 80 }} /></div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const statCards = [
+                { val: stats.definitions?.approved || 0, label: "Approved Defs", sub: `${stats.definitions?.pending || 0} pending`, color: "var(--green)" },
+                { val: stats.hitl?.pending || 0, label: "HITL Queue", sub: "conflicts pending", color: stats.hitl?.pending > 0 ? "var(--yellow)" : "var(--text)" },
+                { val: stats.queries?.total || 0, label: "Total Queries", sub: `avg ${stats.queries?.avg_latency_ms || 0}ms`, color: "var(--blue)" },
+                { val: stats.drift?.unnotified || 0, label: "Drift Events", sub: "unnotified", color: stats.drift?.unnotified > 0 ? "var(--yellow)" : "var(--text)" },
+            ];
+
+            const llmUsage = stats.llm_usage?.today || {};
+            const llmLimits = stats.llm_usage?.limits || {};
+            const totalTokens = stats.llm_usage?.total_tokens || 0;
+            const cacheHits = stats.embedding_cache?.total_cached || 0;
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                    <div className="panel-header">
+                        <div className="panel-title">System Stats</div>
+                        <button className="btn btn-ghost btn-sm" onClick={load}>↻</button>
+                    </div>
+                    <div className="panel-body">
+                        <div className="stats-grid" style={{ marginBottom: 12 }}>
+                            {statCards.map(s => (
+                                <div key={s.label} className="stat-card">
+                                    <div className="stat-val" style={{ color: s.color }}>{s.val}</div>
+                                    <div className="stat-label">{s.label}</div>
+                                    <div className="stat-sub">{s.sub}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="card" style={{ marginBottom: 10 }}>
+                            <div className="card-header">
+                                <span className="card-title">LLM Usage Today</span>
+                                <span className="badge badge-green">Free tier</span>
+                            </div>
+                            {Object.entries(llmUsage).length === 0 ? (
+                                <div style={{ fontSize: 12, color: "var(--text3)" }}>No calls yet today</div>
+                            ) : (
+                                Object.entries(llmUsage).map(([prov, calls]) => (
+                                    <div key={prov} className="usage-row">
+                                        <span style={{ fontSize: 12, width: 80, fontFamily: "monospace", flexShrink: 0 }}>{prov}</span>
+                                        <div className="usage-bar-wrap">
+                                            <div className="usage-bar" style={{
+                                                width: `${Math.min(100, (calls / (llmLimits[prov] || 1000)) * 100)}%`,
+                                                background: "var(--accent)"
+                                            }} />
+                                        </div>
+                                        <span style={{ fontSize: 11, color: "var(--text2)", flexShrink: 0, width: 60, textAlign: "right" }}>
+                                            {calls}/{llmLimits[prov] || "∞"}
+                                        </span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="card">
+                            <div className="card-header"><span className="card-title">Cache</span></div>
+                            <div style={{ fontSize: 12, color: "var(--text2)" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                                    <span>Embedding cache hits</span>
+                                    <strong style={{ color: "var(--green)" }}>{cacheHits}</strong>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                                    <span>Total tokens (all time)</span>
+                                    <strong>{(totalTokens / 1000).toFixed(1)}K</strong>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                    <span>Data DB size</span>
+                                    <strong>{stats.data_db?.size_mb || 0} MB</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── HISTORY PANEL ─────────────────────────────────────────────────
+        function HistoryPanel({ refreshKey }) {
+            const [rows, setRows] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [myOnly, setMyOnly] = useState(true);
+            const [expanded, setExpanded] = useState(null);
+
+            async function load() {
+                setLoading(true);
+                try {
+                    const params = myOnly ? `?session_id=${SESSION_ID}&limit=50` : "?limit=50";
+                    const d = await apiFetch("/api/history" + params);
+                    setRows(d.history || []);
+                } catch (e) { }
+                finally { setLoading(false); }
+            }
+
+            useEffect(() => { load(); }, [refreshKey, myOnly]);
+
+            const statusColor = (s) => s === "ok" ? "green" : s === "conflict_detected" ? "yellow" : "red";
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                    <div className="panel-header">
+                        <div>
+                            <div className="panel-title">Query History</div>
+                            <div className="panel-sub">{rows.length} queries</div>
+                        </div>
+                        <div className="panel-actions">
+                            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text2)", cursor: "pointer" }}>
+                                <input type="checkbox" checked={myOnly} onChange={e => setMyOnly(e.target.checked)}
+                                    style={{ accentColor: "var(--accent)" }} />
+                                My session
+                            </label>
+                            <button className="btn btn-ghost btn-sm" onClick={load}>↻</button>
+                        </div>
+                    </div>
+                    <div className="panel-body">
+                        {loading ? (
+                            [1, 2, 3].map(i => <div key={i} className="skel" style={{ height: 44, borderRadius: 8 }} />)
+                        ) : rows.length === 0 ? (
+                            <div className="empty-state">
+                                <div className="empty-icon">📜</div>
+                                <div className="empty-title">No history yet</div>
+                                <div className="empty-sub">Queries will appear here after you ask something in the chat.</div>
+                            </div>
+                        ) : (
+                            rows.map(r => {
+                                const sr = typeof r.sql_result === "string" ? JSON.parse(r.sql_result || "{}") : r.sql_result || {};
+                                const isExp = expanded === r.id;
+                                return (
+                                    <div key={r.id} style={{ cursor: "pointer" }} onClick={() => setExpanded(p => p === r.id ? null : r.id)}>
+                                        <div className="history-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+                                                <span className={`badge badge-${statusColor(r.status)}`} style={{ flexShrink: 0 }}>
+                                                    {r.status === "ok" ? "✓" : r.status === "conflict_detected" ? "⚠" : "✕"}
+                                                </span>
+                                                <span className="history-q">{r.question}</span>
+                                                <span className="history-meta">{r.latency_ms}ms</span>
+                                            </div>
+                                            <div style={{ display: "flex", gap: 6, alignItems: "center", paddingLeft: 4 }}>
+                                                {r.provider && <span className="provider-chip">{r.provider}</span>}
+                                                <span style={{ fontSize: 10, color: "var(--text3)" }}>{fmtDate(r.created_at)} {fmt(r.created_at)}</span>
+                                            </div>
+                                        </div>
+                                        {isExp && sr?.sql && (
+                                            <div style={{
+                                                background: "var(--bg)", padding: "8px 12px", marginTop: 2, borderRadius: 6,
+                                                fontFamily: "monospace", fontSize: 11, color: "#79c0ff", border: "1px solid var(--border)"
+                                            }}>
+                                                {sr.sql}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ── SETTINGS PANEL ────────────────────────────────────────────────
+        function SettingsPanel() {
+            const [token, setToken] = useState(ADMIN_TOKEN);
+            const [saved, setSaved] = useState(false);
+
+            function save() {
+                localStorage.setItem("dd_token", token);
+                setSaved(true);
+                toast("Token saved — reload to apply", "green");
+                setTimeout(() => setSaved(false), 2000);
+            }
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                    <div className="panel-header">
+                        <div className="panel-title">Settings</div>
+                    </div>
+                    <div className="panel-body">
+                        <div className="card">
+                            <div className="card-header"><span className="card-title">API Token</span></div>
+                            <div className="field">
+                                <label className="label">Admin token (X-API-Key)</label>
+                                <input className="input" type="password" value={token} onChange={e => setToken(e.target.value)}
+                                    placeholder="dd-dev-token-change-in-prod" />
+                            </div>
+                            <button className="btn btn-primary btn-sm" onClick={save}>{saved ? "Saved ✓" : "Save token"}</button>
+                        </div>
+
+                        <div className="card" style={{ marginTop: 10 }}>
+                            <div className="card-header"><span className="card-title">Session</span></div>
+                            <div style={{ fontSize: 12, color: "var(--text2)" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                    <span>Session ID</span>
+                                    <code style={{ fontSize: 11, color: "var(--text3)" }}>{SESSION_ID}</code>
+                                </div>
+                                <button className="btn btn-red btn-sm" onClick={() => {
+                                    localStorage.removeItem("dd_session");
+                                    window.location.reload();
+                                }}>New session</button>
+                            </div>
+                        </div>
+
+                        <div className="card" style={{ marginTop: 10 }}>
+                            <div className="card-header"><span className="card-title">About</span></div>
+                            <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>
+                                <div><strong>DefinitionDrift</strong> v2.0.0</div>
+                                <div style={{ marginTop: 4 }}>Talk-to-Data agent with HITL definition governance.</div>
+                                <div style={{ marginTop: 4 }}>Built with FastAPI · LangGraph · MCP · SQLite</div>
+                                <div style={{ marginTop: 8 }}>
+                                    <a href="/api/docs" target="_blank" className="btn btn-ghost btn-sm">API Docs ↗</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── APP ───────────────────────────────────────────────────────────
+        function App() {
+            const [tab, setTab] = useState("chat");
+            const [wsConn, setWsConn] = useState(false);
+            const [refreshKey, setRefreshKey] = useState(0);
+            const [queueCount, setQueueCount] = useState(0);
+            const [driftCount, setDriftCount] = useState(0);
+
+            // WebSocket
+            useEffect(() => {
+                const proto = window.location.protocol === "https:" ? "wss" : "ws";
+                const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
+                ws.onopen = () => setWsConn(true);
+                ws.onclose = () => setWsConn(false);
+                ws.onmessage = e => {
+                    try {
+                        const d = JSON.parse(e.data);
+                        if (d.event === "conflict_resolved" || d.event === "definition_updated") {
+                            setRefreshKey(p => p + 1);
+                        }
+                        if (d.event === "drift_detected") {
+                            setDriftCount(d.count || 1);
+                            toast(`⚠️ Schema drift: ${d.count} event(s)`, "yellow");
+                        }
+                    } catch (_) { }
+                };
+                const ping = setInterval(() => { if (ws.readyState === 1) ws.send("ping"); }, 25000);
+                return () => { clearInterval(ping); ws.close(); };
+            }, []);
+
+            // Poll queue count
+            useEffect(() => {
+                async function pollQueue() {
+                    try {
+                        const d = await apiFetch("/api/hitl/queue");
+                        setQueueCount(d.pending_count || 0);
+                        const dr = await apiFetch("/api/drift");
+                        setDriftCount((dr.events || []).length);
+                    } catch (_) { }
+                }
+                pollQueue();
+                const t = setInterval(pollQueue, 15000);
+                return () => clearInterval(t);
+            }, [refreshKey]);
+
+            const NAV = [
+                { id: "chat", icon: "💬", label: "Chat" },
+                { id: "defs", icon: "📋", label: "Definitions" },
+                { id: "hitl", icon: "⚠️", label: "HITL Queue", badge: queueCount || null, badgeColor: "" },
+                { id: "drift", icon: "🔍", label: "Drift", badge: driftCount || null, badgeColor: "yellow" },
+                { id: "history", icon: "📜", label: "History" },
+                { id: "stats", icon: "📊", label: "Stats" },
+                { id: "settings", icon: "⚙️", label: "Settings" },
+            ];
+
+            function renderPanel() {
+                const k = refreshKey;
+                switch (tab) {
+                    case "chat": return <ChatPanel wsConn={wsConn} onStatsChange={() => setRefreshKey(p => p + 1)} />;
+                    case "defs": return <DefinitionsPanel refreshKey={k} />;
+                    case "hitl": return <HitlPanel refreshKey={k} onResolved={() => { setRefreshKey(p => p + 1); setQueueCount(p => Math.max(0, p - 1)) }} />;
+                    case "drift": return <DriftPanel refreshKey={k} />;
+                    case "history": return <HistoryPanel refreshKey={k} />;
+                    case "stats": return <StatsPanel refreshKey={k} />;
+                    case "settings": return <SettingsPanel />;
+                    default: return null;
+                }
+            }
+
+            const activeNav = NAV.find(n => n.id === tab);
+
+            return (
+                <div className="app">
+                    {/* Sidebar */}
+                    <div className="sidebar">
+                        <div className="logo">
+                            <div className="logo-icon">⬡</div>
+                            <div className="logo-text">
+                                <h1>DefinitionDrift</h1>
+                                <span>Talk-to-Data</span>
+                            </div>
+                        </div>
+                        <nav className="nav">
+                            {NAV.map(n => (
+                                <div key={n.id} className={`nav-item ${tab === n.id ? "active" : ""}`}
+                                    onClick={() => setTab(n.id)}>
+                                    <span className="ni">{n.icon}</span>
+                                    <span>{n.label}</span>
+                                    {n.badge ? <span className={`nav-badge ${n.badgeColor || ""}`}>{n.badge}</span> : null}
+                                </div>
+                            ))}
+                        </nav>
+                        <div className="sidebar-footer">
+                            <div className={`ws-dot ${wsConn ? "pulse" : "off"}`} />
+                            <span>{wsConn ? "Live" : "Offline"}</span>
+                            <span style={{ marginLeft: "auto", fontSize: 10 }}>v2.0</span>
+                        </div>
+                    </div>
+
+                    {/* Main content */}
+                    <div className="main">
+                        {/* Top bar */}
+                        <div className="topbar">
+                            <div className="topbar-title">
+                                {activeNav?.icon} {activeNav?.label}
+                            </div>
+                            <div className="topbar-sub">
+                                {tab === "chat" && "Contoso Retail · Governed NL-to-SQL"}
+                                {tab === "defs" && "Versioned metric definitions"}
+                                {tab === "hitl" && "Human-in-the-loop conflict resolution"}
+                                {tab === "drift" && "Schema change detection"}
+                                {tab === "history" && "Past queries and results"}
+                                {tab === "stats" && "Usage and performance metrics"}
+                            </div>
+                            <div className="topbar-right">
+                                {queueCount > 0 && tab !== "hitl" && (
+                                    <button className="btn btn-yellow btn-sm" onClick={() => setTab("hitl")}>
+                                        ⚠️ {queueCount} conflict{queueCount !== 1 ? "s" : ""}
+                                    </button>
+                                )}
+                                <a href="/api/docs" target="_blank" className="btn btn-ghost btn-sm">API Docs</a>
+                            </div>
+                        </div>
+
+                        {/* Panel */}
+                        <div className="content">
+                            {renderPanel()}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById("root")).render(
+            <React.StrictMode>
+                <ToastHost />
+                <App />
+            </React.StrictMode>
+        );
+    </script>
+</body>
+
+</html>
