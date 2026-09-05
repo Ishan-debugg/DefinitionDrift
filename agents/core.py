@@ -18,16 +18,14 @@ from embeddings.engine import (
     embed as _engine_embed,
     cosine_similarity as _engine_cosine_similarity,
 )
+from agents.llm_router import call_llm
 
 import sqlglot
-from anthropic import Anthropic
 
 from store.db import (
     get_all_definitions, get_definition_by_name,
     enqueue_conflict, save_schema_snapshot, log_drift
 )
-
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 # Delegates to embeddings/engine.py which uses (in priority order):
@@ -266,25 +264,12 @@ RULES:
 
         user_message = f"{context_block}\n\n## Question\n{question}"
 
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            return {
-                "sql": None,
-                "used_definitions": [d["name"] for d in used_defs],
-                "confidence": "low",
-                "explanation": "No ANTHROPIC_API_KEY set — set it to enable SQL generation.",
-                "warning": "API key required for query generation.",
-                "token_usage": {"input_tokens": 0, "output_tokens": 0, "definitions_injected": len(used_defs)}
-            }
-
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=512,
+        raw, provider = call_llm(
             system=self.SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}]
+            user=user_message,
+            task="sql_generation",
+            max_tokens=512
         )
-
-        raw = resp.content[0].text.strip()
 
         # strip markdown fences if present
         if raw.startswith("```"):
@@ -300,14 +285,13 @@ RULES:
                 "used_definitions": [],
                 "confidence": "low",
                 "explanation": raw,
-                "warning": "Could not parse structured response"
+                "warning": f"Could not parse structured response from {provider}"
             }
 
-        # token usage metadata
+        # token usage metadata (router handles real logging to db)
         result["token_usage"] = {
-            "input_tokens": resp.usage.input_tokens,
-            "output_tokens": resp.usage.output_tokens,
-            "definitions_injected": len(used_defs)
+            "definitions_injected": len(used_defs),
+            "provider": provider
         }
 
         # optionally execute the SQL
