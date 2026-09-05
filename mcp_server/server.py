@@ -1,4 +1,24 @@
+"""
+mcp_server/server.py
+DefinitionDrift MCP Server
+Exposes 4 tools that any MCP client (Claude.ai, Cursor, your chat UI) can call:
 
+  1. query_data          — NL question → governed SQL + result
+  2. list_definitions    — browse all approved definitions
+  3. resolve_conflict    — human approves/merges a HITL queue item
+  4. watch_schema        — trigger a schema diff on a connected DB
+
+Run:  python mcp_server/server.py
+Config for Claude Desktop (~/.claude/claude_desktop_config.json):
+{
+  "mcpServers": {
+    "definitiondrift": {
+      "command": "python",
+      "args": ["/absolute/path/to/definitiondrift/mcp_server/server.py"]
+    }
+  }
+}
+"""
 
 import sys
 import os

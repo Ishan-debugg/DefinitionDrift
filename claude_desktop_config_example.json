@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "definitiondrift": {
+      "command": "python",
+      "args": [
+        "C:\\Users\\91958\\Desktop\\DefinitionDrift\\mcp_server\\server.py"
+      ],
+      "env": {
+        "DATA_DB_PATH": "C:\\Users\\91958\\Desktop\\DefinitionDrift\\data\\contoso.db"
+      }
+    }
+  }
+}
