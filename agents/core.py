@@ -14,6 +14,11 @@ import math
 from typing import Optional
 from datetime import datetime
 
+from embeddings.engine import (
+    embed as _engine_embed,
+    cosine_similarity as _engine_cosine_similarity,
+)
+
 import sqlglot
 from anthropic import Anthropic
 
@@ -25,49 +30,21 @@ from store.db import (
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
-
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    mag_a = math.sqrt(sum(x ** 2 for x in a))
-    mag_b = math.sqrt(sum(x ** 2 for x in b))
-    if mag_a == 0 or mag_b == 0:
-        return 0.0
-    return dot / (mag_a * mag_b)
-
+# Delegates to embeddings/engine.py which uses (in priority order):
+#   1. sentence-transformers all-MiniLM-L6-v2  (local, free, semantic)
+#   2. Claude Haiku API                         (fallback if ST not installed)
+#   3. Char-frequency                           (deterministic offline fallback)
+# Results are cached in embeddings/cache.db, so repeat calls are free.
 
 def _embed(text: str) -> list[float]:
-    """
-    Embedding strategy (in priority order):
-    1. Claude Haiku API — semantic, accurate (requires ANTHROPIC_API_KEY)
-    2. Char-frequency fallback — deterministic, no API, good enough for demo
-    For production: swap with sentence-transformers all-MiniLM-L6-v2.
-    """
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return _char_embed(text)
-    try:
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
-            system=(
-                "You are an embedding simulator. Given text, return ONLY a JSON array "
-                "of 32 floats between -1 and 1 that represent the semantic content. "
-                "No explanation, no markdown, just the raw JSON array."
-            ),
-            messages=[{"role": "user", "content": text}]
-        )
-        return json.loads(resp.content[0].text)
-    except Exception:
-        return _char_embed(text)
+    """Delegate to the shared embedding engine."""
+    vec, _model = _engine_embed(text)
+    return vec
 
 
-def _char_embed(text: str) -> list[float]:
-    """Deterministic char-frequency vector — no API needed."""
-    vec = [0.0] * 32
-    for ch in text.lower():
-        vec[ord(ch) % 32] += 1
-    mag = math.sqrt(sum(x ** 2 for x in vec)) or 1
-    return [x / mag for x in vec]
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Delegate to the shared cosine similarity function."""
+    return _engine_cosine_similarity(a, b)
 
 
 # ── 1. TOKEN OPTIMIZER ────────────────────────────────────────────────────────
@@ -77,7 +54,10 @@ class TokenOptimizer:
     Selects the top-K most relevant definitions for a given question.
     Reduces prompt tokens by 60-80% vs injecting the full definition store.
     """
-    SIMILARITY_THRESHOLD = 0.55
+    # Calibrated for sentence-transformers all-MiniLM-L6-v2 (384-dim).
+    # True matches score 0.55–0.90; unrelated text scores ~0.00.
+    # Old value (0.55) was for 32-dim char-frequency vectors.
+    SIMILARITY_THRESHOLD = 0.40
     TOP_K = 4
 
     def select_relevant(self, question: str, approved_only: bool = True) -> list[dict]:
@@ -120,7 +100,10 @@ class ConflictAgent:
     Detects when a new question is semantically similar to an existing
     definition. If similarity > threshold, pauses and sends to HITL queue.
     """
-    CONFLICT_THRESHOLD = 0.82
+    # Calibrated for sentence-transformers all-MiniLM-L6-v2 (384-dim).
+    # Probe results: true conflicts 0.55–0.70, clean questions ~0.00.
+    # Old value (0.82) was for 32-dim char-frequency vectors.
+    CONFLICT_THRESHOLD = 0.50
 
     def check(self, question: str) -> Optional[dict]:
         """
