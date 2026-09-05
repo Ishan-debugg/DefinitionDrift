@@ -276,4 +276,3 @@ if __name__ == "__main__":
     print(f"Provider used: {provider}")
     print(f"Response: {resp}")
     print(f"\nUsage stats: {json.dumps(get_usage_stats(), indent=2)}")
-    
