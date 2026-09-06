@@ -41,6 +41,7 @@ from store.db import get_pending_conflicts, resolve_conflict
 class QueryState(TypedDict):
     question:       str
     data_db_path:   Optional[str]
+    session_id:     Optional[str]   # ← multi-turn memory key
     conflict:       Optional[dict]
     conflict_id:    Optional[str]
     hitl_resolved:  bool
@@ -107,6 +108,7 @@ def run_query_node(state: QueryState) -> QueryState:
     result = query_agent.run(
         question=state["question"],
         data_db_path=state.get("data_db_path"),
+        session_id=state.get("session_id"),
     )
 
     log.append(f"run_query: done (provider={result.get('provider_used')}, "
@@ -205,6 +207,7 @@ def run_query_pipeline(question: str,
     initial_state: QueryState = {
         "question":      question,
         "data_db_path":  data_db_path,
+        "session_id":    thread_id,   # thread_id doubles as session_id
         "conflict":      None,
         "conflict_id":   None,
         "hitl_resolved": False,

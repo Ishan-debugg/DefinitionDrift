@@ -10,17 +10,25 @@ from typing import Optional, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
+
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from store.db import (
     init_db, get_all_definitions, get_definition_by_name,
     get_definition_history, upsert_definition,
     get_pending_conflicts, resolve_conflict as db_resolve,
     get_unnotified_drift, mark_drift_notified, enqueue_conflict
+)
+from store.conversation import (
+    get_session_messages, clear_session, session_summary, init_conversation_db
 )
 from agents.core import query_agent, conflict_agent, drift_watcher
 from agents.orchestrator import run_query_pipeline
@@ -29,10 +37,14 @@ from embeddings.engine import cache_stats
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
+init_conversation_db()
 DATA_DB = os.getenv("DATA_DB_PATH", str(Path(__file__).parent.parent / "data" / "contoso.db"))
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dd-dev-token-change-in-prod")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+# Rate limiter — keyed by IP address
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 app = FastAPI(
     title="DefinitionDrift",
@@ -41,6 +53,10 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url=None,
 )
+
+# Attach limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -191,7 +207,8 @@ async def delete_definition(name: str, _=Depends(verify_token)):
 
 # ── Query ─────────────────────────────────────────────────────────────────────
 @app.post("/api/query")
-async def run_query(body: QueryRequest):
+@limiter.limit("10/minute")           # per IP: 10 queries/min — protects Groq 30 RPM
+async def run_query(request: Request, body: QueryRequest):
     session_id = body.session_id or str(uuid.uuid4())
     qid = hashlib.md5(f"{body.question}{time.time()}".encode()).hexdigest()[:12]
     t0 = time.time()
@@ -322,6 +339,21 @@ def stats():
                     "size_mb": round(Path(DATA_DB).stat().st_size/1024/1024,2)
                     if Path(DATA_DB).exists() else 0},
     }
+
+# ── Conversation memory ──────────────────────────────────────────────────────
+@app.get("/api/conversation/{session_id}")
+def get_conversation(session_id: str, limit: int = Query(20)):
+    """Get conversation history for a session (for UI replay on refresh)."""
+    msgs = get_session_messages(session_id, limit=limit)
+    summary = session_summary(session_id)
+    return {"session_id": session_id, "messages": msgs, "summary": summary}
+
+@app.delete("/api/conversation/{session_id}")
+async def clear_conversation(session_id: str, _=Depends(verify_token)):
+    """Clear a session's conversation history."""
+    clear_session(session_id)
+    await manager.broadcast({"event": "conversation_cleared", "session_id": session_id})
+    return {"status": "ok", "message": f"Session {session_id} cleared"}
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 @app.websocket("/ws")

@@ -1,134 +1,76 @@
 """
-agents/core.py
-Four agents that power DefinitionDrift:
-  1. QueryAgent        — NL → definition-aware SQL → result
-  2. ConflictAgent     — semantic similarity → HITL queue
-  3. DriftWatcher      — schema diff → HOTL drift log
-  4. TokenOptimizer    — picks only relevant definitions to inject
+agents/core.py  (Phase 3 — multi-turn memory + SQL validation)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Four agents + two new capabilities:
+  - Multi-turn conversation memory (session-scoped)
+  - SQL validation via sqlglot AST + Contoso schema check
 """
 
-import os
-import json
-import sqlite3
-import math
+import os, json, sqlite3, math
 from typing import Optional
-from datetime import datetime
-
-from embeddings.engine import (
-    embed as _engine_embed,
-    cosine_similarity as _engine_cosine_similarity,
-)
-from agents.llm_router import call_llm
-
-import sqlglot
 
 from store.db import (
-    get_all_definitions, get_definition_by_name,
-    enqueue_conflict, save_schema_snapshot, log_drift
+    get_all_definitions, enqueue_conflict,
+    save_schema_snapshot, log_drift,
 )
-
-# ── HELPERS ───────────────────────────────────────────────────────────────────
-# Delegates to embeddings/engine.py which uses (in priority order):
-#   1. sentence-transformers all-MiniLM-L6-v2  (local, free, semantic)
-#   2. Claude Haiku API                         (fallback if ST not installed)
-#   3. Char-frequency                           (deterministic offline fallback)
-# Results are cached in embeddings/cache.db, so repeat calls are free.
-
-def _embed(text: str) -> list[float]:
-    """Delegate to the shared embedding engine."""
-    vec, _model = _engine_embed(text)
-    return vec
+from store.conversation import get_conversation_context, add_message
+from embeddings.engine import embed, cosine_similarity
+from agents.llm_router import call_llm
+from agents.sql_validator import validate_sql
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Delegate to the shared cosine similarity function."""
-    return _engine_cosine_similarity(a, b)
-
-
-# ── 1. TOKEN OPTIMIZER ────────────────────────────────────────────────────────
-
+# ── 1. TOKEN OPTIMIZER ───────────────────────────────────────────────────────
 class TokenOptimizer:
-    """
-    Selects the top-K most relevant definitions for a given question.
-    Reduces prompt tokens by 60-80% vs injecting the full definition store.
-    """
-    # Calibrated for sentence-transformers all-MiniLM-L6-v2 (384-dim).
-    # True matches score 0.55–0.90; unrelated text scores ~0.00.
-    # Old value (0.55) was for 32-dim char-frequency vectors.
-    SIMILARITY_THRESHOLD = 0.40
+    SIMILARITY_THRESHOLD = 0.35
     TOP_K = 4
 
     def select_relevant(self, question: str, approved_only: bool = True) -> list[dict]:
         all_defs = get_all_definitions(approved_only=approved_only)
         if not all_defs:
             return []
-
-        q_vec = _embed(question)
+        q_vec, _ = embed(question)
         scored = []
         for d in all_defs:
-            d_vec = _embed(f"{d['name']} {d['description']}")
-            score = _cosine_similarity(q_vec, d_vec)
+            d_vec, _ = embed(f"{d['name']} {d['description']}")
+            score = cosine_similarity(q_vec, d_vec)
             scored.append((score, d))
-
         scored.sort(key=lambda x: x[0], reverse=True)
         return [d for score, d in scored[:self.TOP_K] if score >= self.SIMILARITY_THRESHOLD]
 
     def build_context_block(self, question: str) -> tuple[str, list[dict]]:
-        """Returns (context_string, relevant_defs_list)"""
         relevant = self.select_relevant(question)
         if not relevant:
             return "", []
-
-        lines = ["## Approved metric definitions\n"]
+        lines = ["## Approved metric definitions (use these EXACTLY)\n"]
         for d in relevant:
             lines.append(f"**{d['name']}**: {d['description']}")
             if d.get("sql_expr"):
-                lines.append(f"  SQL: `{d['sql_expr']}`")
+                lines.append(f"  SQL reference: `{d['sql_expr']}`")
             lines.append("")
         return "\n".join(lines), relevant
-
 
 optimizer = TokenOptimizer()
 
 
-# ── 2. CONFLICT AGENT ─────────────────────────────────────────────────────────
-
+# ── 2. CONFLICT AGENT ────────────────────────────────────────────────────────
 class ConflictAgent:
-    """
-    Detects when a new question is semantically similar to an existing
-    definition. If similarity > threshold, pauses and sends to HITL queue.
-    """
-    # Calibrated for sentence-transformers all-MiniLM-L6-v2 (384-dim).
-    # Probe results: true conflicts 0.55–0.70, clean questions ~0.00.
-    # Old value (0.82) was for 32-dim char-frequency vectors.
-    CONFLICT_THRESHOLD = 0.50
+    CONFLICT_THRESHOLD = 0.82
 
     def check(self, question: str) -> Optional[dict]:
-        """
-        Returns a conflict dict if detected, None if clean.
-        """
         all_defs = get_all_definitions(approved_only=True)
         if not all_defs:
             return None
-
-        q_vec = _embed(question)
-        best_score = 0.0
-        best_def = None
-
+        q_vec, _ = embed(question)
+        best_score, best_def = 0.0, None
         for d in all_defs:
-            d_vec = _embed(f"{d['name']} {d['description']}")
-            score = _cosine_similarity(q_vec, d_vec)
+            d_vec, _ = embed(f"{d['name']} {d['description']}")
+            score = cosine_similarity(q_vec, d_vec)
             if score > best_score:
-                best_score = score
-                best_def = d
-
+                best_score, best_def = score, d
         if best_score >= self.CONFLICT_THRESHOLD and best_def:
             conflict = enqueue_conflict(
-                question_a=question,
-                question_b=best_def["description"],
-                def_a=None,
-                def_b=best_def["name"],
-                similarity=best_score
+                question_a=question, question_b=best_def["description"],
+                def_a=None, def_b=best_def["name"], similarity=best_score,
             )
             return {
                 "conflict": True,
@@ -136,205 +78,207 @@ class ConflictAgent:
                 "matched_definition": best_def["name"],
                 "similarity": round(best_score, 3),
                 "message": (
-                    f"Your question is {round(best_score*100)}% similar to the existing "
-                    f"definition of '{best_def['name']}': \"{best_def['description']}\". "
-                    f"Sending to approval queue (ID: {conflict['id']}) — "
-                    f"a data owner can merge, keep separate, or reject."
-                )
+                    f"Your question is {round(best_score*100)}% similar to "
+                    f"'{best_def['name']}': \"{best_def['description']}\". "
+                    f"Queued for human review (ID: {conflict['id']})."
+                ),
             }
         return None
-
 
 conflict_agent = ConflictAgent()
 
 
 # ── 3. DRIFT WATCHER ─────────────────────────────────────────────────────────
-
 class DriftWatcher:
-    """
-    Snapshots table schemas from a SQLite DB and detects column-level drift.
-    Checks which saved definitions reference changed columns.
-    """
-
     def snapshot_and_diff(self, db_path: str) -> list[dict]:
-        """
-        Returns list of drift events detected. Empty = no changes.
-        """
         events = []
         try:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
-            tables = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
             for table_row in tables:
                 table = table_row["name"]
                 if table.startswith("sqlite_"):
                     continue
-
                 cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
-                current_cols = [
-                    {"name": c["name"], "type": c["type"], "notnull": c["notnull"]}
-                    for c in cols
-                ]
+                current_cols = [{"name": c["name"], "type": c["type"], "notnull": c["notnull"]} for c in cols]
                 changed, prev_cols = save_schema_snapshot(table, current_cols)
-
                 if changed and prev_cols:
-                        prev_names = {c["name"] for c in prev_cols}
-                        curr_names = {c["name"] for c in current_cols}
-                        removed = prev_names - curr_names
-                        added = curr_names - prev_names
-
-                        for col in removed:
-                            affected = self._find_affected_definitions(col)
-                            detail = f"Column '{col}' removed from table '{table}'"
-                            log_drift(table, "column_removed", detail, affected)
-                            events.append({
-                                "type": "column_removed",
-                                "table": table,
-                                "column": col,
-                                "affected_definitions": affected,
-                                "detail": detail
-                            })
-
-                        for col in added:
-                            detail = f"Column '{col}' added to table '{table}'"
-                            log_drift(table, "column_added", detail)
-                            events.append({
-                                "type": "column_added",
-                                "table": table,
-                                "column": col,
-                                "detail": detail
-                            })
+                    prev_names = {c["name"] for c in prev_cols}
+                    curr_names = {c["name"] for c in current_cols}
+                    for col in prev_names - curr_names:
+                        affected = self._find_affected(col)
+                        detail = f"Column '{col}' removed from '{table}'"
+                        log_drift(table, "column_removed", detail, affected)
+                        events.append({"type": "column_removed", "table": table,
+                                       "column": col, "affected_definitions": affected, "detail": detail})
+                    for col in curr_names - prev_names:
+                        detail = f"Column '{col}' added to '{table}'"
+                        log_drift(table, "column_added", detail)
+                        events.append({"type": "column_added", "table": table, "column": col, "detail": detail})
             conn.close()
         except Exception as e:
             events.append({"type": "error", "detail": str(e)})
-
         return events
 
-    def _find_affected_definitions(self, column_name: str) -> Optional[str]:
-        defs = get_all_definitions()
-        affected = []
-        for d in defs:
-            if d.get("sql_expr") and column_name.lower() in d["sql_expr"].lower():
-                affected.append(d["name"])
+    def _find_affected(self, column_name: str) -> Optional[str]:
+        affected = [d["name"] for d in get_all_definitions()
+                    if d.get("sql_expr") and column_name.lower() in d["sql_expr"].lower()]
         return json.dumps(affected) if affected else None
-
 
 drift_watcher = DriftWatcher()
 
 
-# ── 4. QUERY AGENT ────────────────────────────────────────────────────────────
-
+# ── 4. QUERY AGENT ───────────────────────────────────────────────────────────
 class QueryAgent:
-    """
-    Takes a natural language question, injects only relevant definitions
-    (via TokenOptimizer), and returns a governed SQL query + explanation.
+    SYSTEM_PROMPT = """\
+You are a data analyst for a Contoso Retail SQLite database.
 
-    Two-pass:
-      Pass 1 (optimizer)  — picks relevant definitions, ~100 token context
-      Pass 2 (generation) — Claude generates SQL grounded in those definitions
-    """
+SCHEMA (Contoso tables available):
+  FactSales        — SalesKey, DateKey, StoreKey, ProductKey, CustomerKey,
+                     UnitCost, UnitPrice, SalesQuantity, ReturnQuantity,
+                     ReturnAmount, DiscountAmount, TotalCost, SalesAmount, Margin
+  FactOnlineSales  — same columns, online channel only (StoreKey=306)
+  DimProduct       — ProductKey, ProductName, BrandName, UnitCost, UnitPrice, Status
+  DimStore         — StoreKey, StoreName, StoreType, Status, GeographyKey
+  DimCustomer      — CustomerKey, FirstName, LastName, AnnualIncome, Occupation, Gender
+  DimDate          — DateKey (YYYYMMDD int), CalendarYear, CalendarMonth,
+                     CalendarQuarter, FiscalYear, FiscalMonth, FiscalQuarter
+  DimProductCategory      — ProductCategoryKey, ProductCategoryName
+  DimProductSubcategory   — ProductSubcategoryKey, ProductSubcategoryName, ProductCategoryKey
 
-    SYSTEM_PROMPT = """You are a data analyst assistant for DefinitionDrift.
+RULES (strict):
+1. Use approved metric definitions EXACTLY — never rewrite their SQL.
+2. If the question maps to an approved definition, embed its SQL as a CTE.
+3. Never use column or table names not listed in SCHEMA above.
+4. Use YYYYMMDD integer format for DateKey comparisons (e.g. 20080101).
+5. Join DimDate on FactSales.DateKey = DimDate.DateKey for date filtering.
+6. Return ONLY this exact JSON — no markdown, no extra text:
+{
+  "sql": "<valid SQLite SQL or null>",
+  "used_definitions": ["names of definitions used"],
+  "confidence": "high|medium|low",
+  "explanation": "one sentence describing what this measures",
+  "warning": "<caveat or null>"
+}
+7. temperature=0 — be deterministic. Same question must produce identical SQL."""
 
-Your job:
-1. Use the provided approved metric definitions EXACTLY as written.
-2. Generate SQL that is consistent with those definitions every time.
-3. If the question maps to an approved definition, use its SQL expression directly.
-4. If no definition matches, say so explicitly — do NOT guess joins or column names.
-5. Always return a JSON object with:
-   {
-     "sql": "the SQL query or null",
-     "used_definitions": ["list of definition names used"],
-     "confidence": "high|medium|low",
-     "explanation": "one sentence explaining what this query measures",
-     "warning": "any caveats or null"
-   }
+    def run(
+        self,
+        question: str,
+        data_db_path: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> dict:
+        # ── Pass 1: build conversation history block ──────────────────────────
+        history_block = ""
+        if session_id:
+            history = get_conversation_context(session_id, max_turns=6)
+            if history:
+                lines = ["## Conversation history (most recent last)"]
+                for m in history:
+                    role_label = "User" if m["role"] == "user" else "Assistant"
+                    lines.append(f"{role_label}: {m['content']}")
+                lines.append("")
+                history_block = "\n".join(lines)
 
-RULES:
-- Never fabricate column names.
-- If a definition has a SQL expression, use it verbatim as a subquery or CTE.
-- Prefer deterministic over creative. Same question = same SQL, always.
-"""
-
-    def run(self, question: str, data_db_path: Optional[str] = None) -> dict:
+        # ── Pass 2: inject relevant definitions (token optimizer) ─────────────
         context_block, used_defs = optimizer.build_context_block(question)
 
-        user_message = f"{context_block}\n\n## Question\n{question}"
+        # ── Build final prompt ────────────────────────────────────────────────
+        parts = []
+        if history_block:
+            parts.append(history_block)
+        if context_block:
+            parts.append(context_block)
+        parts.append(f"## Current question\n{question}")
+        user_msg = "\n\n".join(parts)
 
+        # ── Pass 3: generate SQL via free LLM ─────────────────────────────────
         raw, provider = call_llm(
-            system=self.SYSTEM_PROMPT,
-            user=user_message,
-            task="sql_generation",
-            max_tokens=512
+            system=self.SYSTEM_PROMPT, user=user_msg,
+            task="sql_generation", max_tokens=512,
         )
 
-        # strip markdown fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:])
 
         try:
-            result = json.loads(raw)
+            result = json.loads(text)
         except Exception:
-            result = {
-                "sql": None,
-                "used_definitions": [],
-                "confidence": "low",
-                "explanation": raw,
-                "warning": f"Could not parse structured response from {provider}"
-            }
+            result = {"sql": None, "used_definitions": [],
+                      "confidence": "low", "explanation": text[:300],
+                      "warning": "Could not parse LLM response as JSON"}
 
-        # token usage metadata (router handles real logging to db)
-        result["token_usage"] = {
-            "definitions_injected": len(used_defs),
-            "provider": provider
-        }
+        result["provider_used"] = provider
+        result["definitions_injected"] = len(used_defs)
 
-        # optionally execute the SQL
+        # ── Pass 4: SQL validation (AST parse + schema check) ─────────────────
+        if result.get("sql"):
+            validation = validate_sql(result["sql"])
+            result["validation"] = validation.to_dict()
+
+            if not validation.valid:
+                # Surface validation errors to user — do NOT execute bad SQL
+                result["warning"] = (
+                    (result.get("warning") or "") +
+                    " | Validation errors: " + "; ".join(validation.errors)
+                ).strip(" |")
+                result["confidence"] = "low"
+                # Use reformatted SQL if parse succeeded (schema error only)
+                if validation.parse_ok and validation.fixed_sql:
+                    result["sql_original"] = result["sql"]
+                    result["sql"] = validation.fixed_sql
+                # Do not execute if schema errors exist
+                if not validation.schema_ok:
+                    result["query_result"] = {
+                        "error": "SQL blocked by schema validation: " + "; ".join(validation.errors),
+                        "validation_errors": validation.errors,
+                    }
+                    self._save_to_memory(session_id, question, result)
+                    return result
+            else:
+                # Use prettier reformatted SQL
+                if validation.fixed_sql:
+                    result["sql"] = validation.fixed_sql
+                if validation.warnings:
+                    result["validation_warnings"] = validation.warnings
+
+        # ── Pass 5: execute SQL ───────────────────────────────────────────────
         if result.get("sql") and data_db_path:
             result["query_result"] = self._execute(result["sql"], data_db_path)
 
+        # ── Save to conversation memory ───────────────────────────────────────
+        self._save_to_memory(session_id, question, result)
         return result
+
+    def _save_to_memory(self, session_id: Optional[str], question: str, result: dict):
+        """Persist turn to conversation memory for multi-turn context."""
+        if not session_id:
+            return
+        try:
+            add_message(session_id, "user", question, "question")
+            explanation = result.get("explanation", "")
+            add_message(
+                session_id, "assistant", explanation, "sql_result",
+                sql_result={
+                    "sql": result.get("sql"),
+                    "used_definitions": result.get("used_definitions", []),
+                    "confidence": result.get("confidence"),
+                }
+            )
+        except Exception:
+            pass  # memory failure never blocks the query
 
     def _execute(self, sql: str, db_path: str) -> dict:
         try:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(sql).fetchmany(50)
+            rows = conn.execute(sql).fetchmany(100)
             conn.close()
-            return {
-                "rows": [dict(r) for r in rows],
-                "row_count": len(rows)
-            }
+            return {"rows": [dict(r) for r in rows], "row_count": len(rows)}
         except Exception as e:
-            return {"error": str(e)}
-
+            return {"error": str(e), "sql_attempted": sql}
 
 query_agent = QueryAgent()
-
-
-if __name__ == "__main__":
-    from store.db import init_db
-    import subprocess
-    subprocess.run(["python", "store/db.py"], check=True)
-
-    print("\n=== TokenOptimizer test ===")
-    ctx, defs = optimizer.build_context_block("how many users logged in this week?")
-    print(f"Relevant definitions selected: {[d['name'] for d in defs]}")
-    print(f"Context block length: {len(ctx)} chars")
-
-    print("\n=== ConflictAgent test ===")
-    conflict = conflict_agent.check("show me active users from last week")
-    if conflict:
-        print(f"Conflict detected: {conflict['message']}")
-    else:
-        print("No conflict detected")
-
-    print("\n=== QueryAgent test ===")
-    result = query_agent.run("What is the total revenue excluding refunds?")
-    print(json.dumps(result, indent=2))
-    
