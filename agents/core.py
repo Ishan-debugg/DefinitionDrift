@@ -6,7 +6,7 @@ Four agents + two new capabilities:
   - SQL validation via sqlglot AST + Contoso schema check
 """
 
-import json, sqlite3
+import json, sqlite3, re
 from typing import Optional
 
 from store.db import (
@@ -17,6 +17,67 @@ from store.conversation import get_conversation_context, add_message
 from embeddings.engine import embed, cosine_similarity
 from agents.llm_router import call_llm
 from agents.sql_validator import validate_sql
+
+
+# ── LLM response parser ──────────────────────────────────────────────────────
+def _parse_llm_response(raw: str) -> dict:
+    """
+    Robustly extract a structured result dict from whatever the LLM returned.
+
+    Handles (in order):
+      1. Clean JSON string  — happy path
+      2. JSON inside ```json ... ``` fence
+      3. JSON inside ``` ... ``` fence
+      4. JSON object buried anywhere inside prose
+      5. Prose with a SELECT statement — extract SQL via regex
+      6. Total failure fallback — sql=None, raw text → explanation
+    """
+    text = raw.strip()
+
+    # ── 1. Direct JSON parse ──────────────────────────────────────────────────
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # ── 2 & 3. JSON inside markdown fences (```json or ```) ──────────────────
+    fence_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if fence_match:
+        inner = fence_match.group(1).strip()
+        try:
+            return json.loads(inner)
+        except Exception:
+            pass
+
+    # ── 4. JSON object embedded somewhere in prose ────────────────────────────
+    # Finds the first {...} block that spans multiple keys — avoids false matches
+    json_match = re.search(r'(\{[^{}]*"sql"[^{}]*\})', text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1))
+        except Exception:
+            pass
+
+    # ── 5. Prose response — extract SQL via regex ─────────────────────────────
+    # Matches SELECT ... until a blank line or end of string
+    sql_match = re.search(
+        r'\b(SELECT[\s\S]+?)(?:\n{2,}|$)',
+        text, re.IGNORECASE
+    )
+    extracted_sql = sql_match.group(1).strip() if sql_match else None
+
+    return {
+        "sql": extracted_sql,
+        "used_definitions": [],
+        "confidence": "low",
+        "explanation": text[:400],
+        "warning": (
+            "SQL extracted from prose — LLM ignored JSON instruction. "
+            "Add a valid GROQ_API_KEY for reliable structured output."
+            if extracted_sql
+            else "Could not parse LLM response. Check API keys in .env."
+        ),
+    }
 
 
 # ── 1. TOKEN OPTIMIZER ───────────────────────────────────────────────────────
@@ -199,17 +260,7 @@ RULES (strict):
             task="sql_generation", max_tokens=512,
         )
 
-        text = raw.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:])
-
-        try:
-            result = json.loads(text)
-        except Exception:
-            result = {"sql": None, "used_definitions": [],
-                      "confidence": "low", "explanation": text[:300],
-                      "warning": "Could not parse LLM response as JSON"}
+        result = _parse_llm_response(raw)
 
         result["provider_used"] = provider
         result["definitions_injected"] = len(used_defs)
