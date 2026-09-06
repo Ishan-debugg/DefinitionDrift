@@ -13,14 +13,15 @@ Sections:
 Run: python tests/test_phase3.py
 """
 
-import sys, os, json, time, sqlite3
+import sys, os, json, time, sqlite3, tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import store.db as db_module
-TEST_DB   = "/tmp/dd_phase3_test.db"
-CONV_DB_P = "/tmp/dd_phase3_conv.db"
+_TMPDIR   = Path(tempfile.gettempdir())
+TEST_DB   = str(_TMPDIR / "dd_phase3_test.db")
+CONV_DB_P = str(_TMPDIR / "dd_phase3_conv.db")
 db_module.DB_PATH = Path(TEST_DB)
 if Path(TEST_DB).exists():   Path(TEST_DB).unlink()
 
@@ -201,11 +202,15 @@ check("B5  Context block has user/assistant pairs",
       len(ctx) >= 2 and ctx[0]["role"] == "user",
       f"turns={len(ctx)}")
 
-# B6 — context roles alternate correctly
+# B6 — context roles alternate correctly (user then assistant, repeating)
 roles = [m["role"] for m in ctx]
+def _alternates(roles):
+    for i in range(len(roles) - 1):
+        if roles[i] == roles[i + 1]:
+            return False
+    return True
 check("B6  Context alternates user/assistant",
-      roles == sorted(roles, key=lambda r: ["user","assistant"].index(r) if r in ["user","assistant"] else 0)
-      or len(set(roles)) >= 1,
+      _alternates(roles),
       f"roles={roles}")
 
 # B7 — max_turns limit

@@ -6,7 +6,7 @@ Four agents + two new capabilities:
   - SQL validation via sqlglot AST + Contoso schema check
 """
 
-import os, json, sqlite3, math
+import json, sqlite3
 from typing import Optional
 
 from store.db import (
