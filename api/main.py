@@ -33,7 +33,7 @@ from store.conversation import (
 from agents.core import query_agent, conflict_agent, drift_watcher
 from agents.orchestrator import run_query_pipeline
 from agents.llm_router import get_usage_stats
-from embeddings.engine import cache_stats
+from embeddings.engine import cache_stats, get_active_model
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
@@ -334,6 +334,7 @@ def stats():
         "queries": {"total": total_q, "successful": ok_q,
                     "avg_latency_ms": round(avg_lat or 0, 0)},
         "embedding_cache": emb,
+        "embedding_model": get_active_model(),
         "llm_usage": usage,
         "data_db": {"path": DATA_DB, "exists": Path(DATA_DB).exists(),
                     "size_mb": round(Path(DATA_DB).stat().st_size/1024/1024,2)

@@ -70,22 +70,69 @@ def _cache_set(text: str, vector: list[float], model: str):
 _st_model = None
 _model_name = None
 
+# Check once at import time so the banner appears on startup, not lazily.
+def _sentence_transformers_installed() -> bool:
+    """True if the package is present in the current environment."""
+    import importlib.util
+    return importlib.util.find_spec("sentence_transformers") is not None
+
+_ST_AVAILABLE: bool = _sentence_transformers_installed()
+
+if not _ST_AVAILABLE:
+    print(
+        "\n"
+        "[Embeddings] WARNING: sentence-transformers not installed.\n"
+        "  Conflict detection will use a character-frequency fallback\n"
+        "  which causes false positives on unrelated queries.\n"
+        "\n"
+        "  Fix (free, CPU-only, ~90 MB one-time download):\n"
+        "      pip install sentence-transformers\n"
+        "  The model (all-MiniLM-L6-v2) will auto-download on first run.\n"
+    )
+
+
 def _load_sentence_transformer():
+    """Load all-MiniLM-L6-v2, showing a tqdm progress bar on first download."""
     global _st_model, _model_name
     if _st_model is not None:
         return _st_model
+    if not _ST_AVAILABLE:
+        return None
     try:
         from sentence_transformers import SentenceTransformer
+
+        # Wire tqdm so Hugging Face download shows a live progress bar
+        try:
+            from tqdm import tqdm as _tqdm
+            import huggingface_hub.file_download as _hf_dl
+            if hasattr(_hf_dl, "tqdm"):
+                _hf_dl.tqdm = _tqdm
+        except Exception:
+            pass  # tqdm unavailable — silent download is fine
+
+        print("[Embeddings] Loading all-MiniLM-L6-v2 (auto-downloads ~90 MB on first run)...")
         _st_model = SentenceTransformer("all-MiniLM-L6-v2")
         _model_name = "all-MiniLM-L6-v2"
-        print("[Embeddings] Loaded local all-MiniLM-L6-v2 ✅ (free, fast)")
+        print("[Embeddings] Loaded local all-MiniLM-L6-v2 OK (free, fast)")
         return _st_model
-    except ImportError:
-        print("[Embeddings] sentence-transformers not installed → using Haiku fallback")
-        return None
     except Exception as e:
-        print(f"[Embeddings] Local model failed ({e}) → using Haiku fallback")
+        print(f"[Embeddings] Local model failed ({e}) -> using Haiku/charfreq fallback")
         return None
+
+
+def get_active_model() -> str:
+    """Return the name of the embedding tier that will be used for the next call.
+
+    Possible values:
+      'all-MiniLM-L6-v2'  — local sentence-transformers (best quality)
+      'claude-haiku'       — Anthropic API fallback (requires ANTHROPIC_API_KEY)
+      'charfreq'           — deterministic fallback (no external deps, lowest quality)
+    """
+    if _ST_AVAILABLE:
+        return "all-MiniLM-L6-v2"
+    if os.getenv("ANTHROPIC_API_KEY", ""):
+        return "claude-haiku"
+    return "charfreq"
 
 # ── Embedding strategies ──────────────────────────────────────────────────────
 def _embed_local(text: str) -> Optional[list[float]]:
