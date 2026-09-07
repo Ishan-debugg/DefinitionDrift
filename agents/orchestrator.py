@@ -190,7 +190,14 @@ def build_graph():
     if _SQLITE_AVAILABLE:
         # Ensure the data/ directory exists
         settings.CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
-        checkpointer = SqliteSaver.from_conn_string(str(settings.CHECKPOINT_DB))
+        # from_conn_string is a @contextmanager (yields, not returns).
+        # For a module-level singleton we open the connection manually so it
+        # stays alive for the entire process lifetime.
+        import sqlite3 as _sqlite3
+        _checkpoint_conn = _sqlite3.connect(
+            str(settings.CHECKPOINT_DB), check_same_thread=False
+        )
+        checkpointer = SqliteSaver(_checkpoint_conn)
         print(f"[orchestrator] SqliteSaver checkpointer → {settings.CHECKPOINT_DB}")
     else:
         checkpointer = MemorySaver()

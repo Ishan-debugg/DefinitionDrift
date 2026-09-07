@@ -306,11 +306,12 @@ check("F1 Query agent returns dict", isinstance(result, dict))
 
 # F2
 check("F2 Result has required keys",
-      all(k in result for k in ("sql", "confidence", "used_definitions", "token_usage")),
+      all(k in result for k in ("sql", "confidence", "used_definitions", "provider_used", "escalated")),
       str(list(result.keys())))
 
 # F3
-check("F3 Token usage tracked", isinstance(result.get("token_usage"), dict))
+check("F3 Escalated flag present (False by default on high/medium confidence)",
+      "escalated" in result, f"escalated={result.get('escalated')}")
 
 # F4 — consistency: same question → same SQL
 r1 = query_agent.run("What is net revenue?")
