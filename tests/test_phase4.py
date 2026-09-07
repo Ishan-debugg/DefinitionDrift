@@ -130,18 +130,23 @@ check("A6  data/checkpoints.db created on disk",
       str(settings.CHECKPOINT_DB) if hasattr(settings, "CHECKPOINT_DB") else "missing")
 
 # A7 — checkpoint DB has the expected LangGraph tables
+# SqliteSaver.setup() is now called eagerly in build_graph(), so tables should
+# exist immediately after get_graph() is called (done in A5 above).
 if hasattr(settings, "CHECKPOINT_DB") and settings.CHECKPOINT_DB.exists():
+    _cp_tables: set = set()
     try:
-        conn = sqlite3.connect(str(settings.CHECKPOINT_DB))
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
+        _conn = sqlite3.connect(str(settings.CHECKPOINT_DB))
+        # LangGraph may create tables OR views; check all named objects
+        _cp_tables = {r[0] for r in _conn.execute(
+            "SELECT name FROM sqlite_master"
         ).fetchall()}
-        conn.close()
-        has_cp_table = bool(tables)  # LangGraph creates its own tables
-    except Exception:
-        has_cp_table = False
-    check("A7  checkpoints.db has at least one LangGraph table",
-          has_cp_table, f"tables={tables if has_cp_table else 'none'}")
+        _conn.close()
+        _has_cp_objects = bool(_cp_tables)
+    except Exception as _e:
+        _has_cp_objects = False
+        _cp_tables = {f"error: {_e}"}
+    check("A7  checkpoints.db has LangGraph schema objects after setup()",
+          _has_cp_objects, f"objects={_cp_tables}")
 else:
     check("A7  checkpoints.db tables", True, "skipped — DB not created yet", skip=True)
 

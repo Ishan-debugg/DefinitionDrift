@@ -198,6 +198,10 @@ def build_graph():
             str(settings.CHECKPOINT_DB), check_same_thread=False
         )
         checkpointer = SqliteSaver(_checkpoint_conn)
+        # Eagerly create the LangGraph checkpoint schema tables so they exist
+        # immediately (before any pipeline run), enabling health checks and
+        # admin tooling to inspect the DB on startup.
+        checkpointer.setup()
         print(f"[orchestrator] SqliteSaver checkpointer → {settings.CHECKPOINT_DB}")
     else:
         checkpointer = MemorySaver()
