@@ -17,6 +17,7 @@ from store.conversation import get_conversation_context, add_message
 from embeddings.engine import embed, cosine_similarity
 from agents.llm_router import call_llm
 from agents.sql_validator import validate_sql
+from config import settings
 
 
 # ── LLM response parser ──────────────────────────────────────────────────────
@@ -264,6 +265,31 @@ RULES (strict):
 
         result["provider_used"] = provider
         result["definitions_injected"] = len(used_defs)
+        result["escalated"] = False  # default; set True if we escalate below
+
+        # ── Confidence-based model escalation ────────────────────────────────
+        # When the fast model admits low confidence, re-run with the smart model.
+        # LOW_CONFIDENCE_THRESHOLD = 0.60 (see config/settings.py), but the LLM
+        # reports categorical "low"|"medium"|"high" — we escalate on "low".
+        if result.get("confidence") == "low":
+            print(
+                f"[QueryAgent] confidence=low — escalating to {settings.QUERY_MODEL_SMART}"
+            )
+            raw2, provider2 = call_llm(
+                system=self.SYSTEM_PROMPT,
+                user=user_msg,
+                task="sql_generation_smart",
+                max_tokens=settings.MAX_TOKENS_QUERY,
+                model_override=settings.QUERY_MODEL_SMART,
+            )
+            result2 = _parse_llm_response(raw2)
+            result2["provider_used"] = provider2
+            result2["definitions_injected"] = len(used_defs)
+            result2["escalated"] = True
+            result2["escalated_from_provider"] = provider
+            # Keep the escalated result only if it actually produced SQL or higher confidence
+            if result2.get("sql") or result2.get("confidence", "low") != "low":
+                result = result2
 
         # ── Pass 4: SQL validation (AST parse + schema check) ─────────────────
         if result.get("sql"):

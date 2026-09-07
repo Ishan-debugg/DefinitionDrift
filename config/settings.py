@@ -38,6 +38,7 @@ OPTIMIZER_TOP_K = 4                    # max definitions to inject per query
 DEFINITION_DB  = ROOT / "definitiondrift.db"
 DATA_DB_PATH   = Path(os.getenv("DATA_DB_PATH", str(ROOT / "data" / "contoso.db")))
 EMBEDDING_CACHE = ROOT / "embeddings" / "cache.db"
+CHECKPOINT_DB  = ROOT / "data" / "checkpoints.db"   # LangGraph SqliteSaver — survives restarts
 
 # ── API ───────────────────────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")

@@ -145,8 +145,13 @@ def get_usage_stats() -> dict:
 # ── Core call function ────────────────────────────────────────────────────────
 
 def _call_openai_compat(provider_name: str, system: str, user: str,
-                         max_tokens: int = 512, task: str = "general") -> Optional[str]:
-    """Call any OpenAI-compatible provider."""
+                         max_tokens: int = 512, task: str = "general",
+                         model_override: Optional[str] = None) -> Optional[str]:
+    """Call any OpenAI-compatible provider.
+
+    model_override: if set, replaces the provider's default model string.
+    Used by confidence-based escalation to force QUERY_MODEL_SMART.
+    """
     cfg = PROVIDERS[provider_name]
     api_key = os.getenv(cfg["api_key_env"], "")
     if not api_key:
@@ -157,11 +162,12 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
         print(f"[LLM Router] {provider_name} daily limit reached ({cfg['rpd']} calls)")
         return None
 
+    model = model_override or cfg["model"]
     client = OpenAI(api_key=api_key, base_url=cfg["base_url"])
     start = time.time()
     try:
         resp = client.chat.completions.create(
-            model=cfg["model"],
+            model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user}
@@ -172,16 +178,16 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
         latency = int((time.time() - start) * 1000)
         text = resp.choices[0].message.content.strip()
         usage = resp.usage
-        _log_call(provider_name, cfg["model"], task,
+        _log_call(provider_name, model, task,
                   usage.prompt_tokens if usage else 0,
                   usage.completion_tokens if usage else 0,
                   latency, True)
-        print(f"[LLM Router] {provider_name} OK ({latency}ms)")
+        print(f"[LLM Router] {provider_name}/{model} OK ({latency}ms)")
         return text
     except Exception as e:
         latency = int((time.time() - start) * 1000)
-        _log_call(provider_name, cfg["model"], task, 0, 0, latency, False, str(e))
-        print(f"[LLM Router] {provider_name} failed: {e}")
+        _log_call(provider_name, model, task, 0, 0, latency, False, str(e))
+        print(f"[LLM Router] {provider_name}/{model} failed: {e}")
         return None
 
 
@@ -225,34 +231,40 @@ def _call_gemini(system: str, user: str, max_tokens: int = 512,
 
 def call_llm(system: str, user: str,
              task: str = "sql_generation",
-             max_tokens: int = 512) -> tuple[str, str]:
+             max_tokens: int = 512,
+             model_override: Optional[str] = None) -> tuple[str, str]:
     """
     Routes to best available free provider for the given task.
     Returns (response_text, provider_name_used).
 
     task options:
-      "sql_generation"  → Groq primary (fastest, best structured output)
-      "hitl_explain"    → Gemini primary (most quota, long context)
-      "batch_eval"      → Cerebras primary (most tokens/day)
-      "fallback"        → OpenRouter
+      "sql_generation"       → Groq primary (fastest, best structured output)
+      "sql_generation_smart" → same providers but with model_override for Sonnet/70B
+      "hitl_explain"         → Gemini primary (most quota, long context)
+      "batch_eval"           → Cerebras primary (most tokens/day)
+      "fallback"             → OpenRouter
 
+    model_override: if set, forces a specific model string on each provider attempt.
     Falls through providers automatically if one fails or hits limits.
     """
     providers_by_task = {
-        "sql_generation": ["groq", "cerebras", "openrouter"],
-        "hitl_explain":   ["gemini", "groq", "openrouter"],
-        "batch_eval":     ["cerebras", "groq", "openrouter"],
-        "conflict_check": ["groq", "openrouter"],
-        "general":        ["groq", "gemini", "cerebras", "openrouter"],
+        "sql_generation":       ["groq", "cerebras", "openrouter"],
+        "sql_generation_smart": ["groq", "cerebras", "openrouter"],  # same fallback chain, smarter model
+        "hitl_explain":         ["gemini", "groq", "openrouter"],
+        "batch_eval":           ["cerebras", "groq", "openrouter"],
+        "conflict_check":       ["groq", "openrouter"],
+        "general":              ["groq", "gemini", "cerebras", "openrouter"],
     }
 
     ordered = providers_by_task.get(task, ["groq", "gemini", "cerebras", "openrouter"])
 
     for provider in ordered:
         if provider == "gemini":
+            # Gemini does not support model_override via its SDK in this wrapper
             result = _call_gemini(system, user, max_tokens, task)
         else:
-            result = _call_openai_compat(provider, system, user, max_tokens, task)
+            result = _call_openai_compat(provider, system, user, max_tokens, task,
+                                         model_override=model_override)
 
         if result:
             return result, provider

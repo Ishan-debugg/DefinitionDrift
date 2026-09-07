@@ -31,8 +31,21 @@ from typing import TypedDict, Optional, Annotated
 from pathlib import Path
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
 
+# ── Checkpointer: SqliteSaver (persistent) with MemorySaver fallback ─────────
+try:
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    _SQLITE_AVAILABLE = True
+except ImportError:
+    from langgraph.checkpoint.memory import MemorySaver
+    _SQLITE_AVAILABLE = False
+    print(
+        "[orchestrator] langgraph-checkpoint-sqlite not installed. "
+        "Falling back to MemorySaver (state lost on restart). "
+        "Run: pip install langgraph-checkpoint-sqlite"
+    )
+
+from config import settings
 from agents.core import conflict_agent, query_agent, drift_watcher
 from store.db import get_pending_conflicts, resolve_conflict
 
@@ -153,9 +166,12 @@ def route_after_hitl(state: QueryState) -> str:
 # ── Build graph ───────────────────────────────────────────────────────────────
 
 def build_graph():
-    """Build and compile the LangGraph state machine with memory checkpointing."""
-    checkpointer = MemorySaver()
+    """Build and compile the LangGraph state machine with SQLite checkpointing.
 
+    SqliteSaver persists the full graph state to disk so HITL interrupts
+    survive server restarts.  When the package is absent we degrade to
+    in-memory checkpointing with a clear warning.
+    """
     g = StateGraph(QueryState)
 
     g.add_node("check_conflict",  check_conflict_node)
@@ -170,6 +186,14 @@ def build_graph():
                              {"run_query": "run_query", END: END})
     g.add_edge("run_query",      "check_drift")
     g.add_edge("check_drift",    END)
+
+    if _SQLITE_AVAILABLE:
+        # Ensure the data/ directory exists
+        settings.CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
+        checkpointer = SqliteSaver.from_conn_string(str(settings.CHECKPOINT_DB))
+        print(f"[orchestrator] SqliteSaver checkpointer → {settings.CHECKPOINT_DB}")
+    else:
+        checkpointer = MemorySaver()
 
     return g.compile(checkpointer=checkpointer)
 
