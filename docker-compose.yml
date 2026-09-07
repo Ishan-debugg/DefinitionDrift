@@ -1,6 +1,11 @@
 # DefinitionDrift — docker-compose
 # One command to run the full stack: docker-compose up
-# Zero purchase: no paid services, no cloud DBs
+# Zero purchase: no paid services required
+#
+# Database options (set DATA_DB_URL in environment or .env):
+#   SQLite  (default) — no extra service needed
+#   Postgres          — uncomment the 'db' service below and set DATA_DB_URL
+#   MySQL             — replace 'db' image with mysql:8 and adjust DATA_DB_URL
 
 version: "3.9"
 
@@ -16,7 +21,10 @@ services:
       - ./embeddings/cache.db:/app/embeddings/cache.db
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - DATA_DB_PATH=/app/data/contoso.db
+      # SQLite (default — no extra service needed)
+      - DATA_DB_URL=sqlite:////app/data/contoso.db
+      # Postgres example (uncomment + uncomment 'db' service below):
+      # - DATA_DB_URL=postgresql+psycopg2://dd:dd_pass@db:5432/contoso
       - ENV=production
     restart: unless-stopped
     healthcheck:
@@ -24,16 +32,40 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
 
   mcp:
     build: .
     command: python mcp_server/server.py
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - DATA_DB_PATH=/app/data/contoso.db
+      - DATA_DB_URL=sqlite:////app/data/contoso.db
     volumes:
       - ./data:/app/data
       - ./definitiondrift.db:/app/definitiondrift.db
     restart: unless-stopped
     depends_on:
       - api
+
+  # ── Optional Postgres service ───────────────────────────────────────
+  # Uncomment and set DATA_DB_URL=postgresql+psycopg2://dd:dd_pass@db:5432/contoso
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: dd
+  #     POSTGRES_PASSWORD: dd_pass
+  #     POSTGRES_DB: contoso
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U dd -d contoso"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+# volumes:
+#   pgdata:
