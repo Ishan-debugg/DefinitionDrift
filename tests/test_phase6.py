@@ -335,6 +335,110 @@ check("D5  DATA_DB_URL takes priority over DATA_DB_PATH when both set",
 os.environ.pop("DATA_DB_URL", None)  # clean up
 
 
+# ══════════════════════════════════════════════════════════════════
+# [E] DRIFT WATCHER — COLUMN RENAME DETECTION — 9 tests
+#
+# SQLite has no native RENAME COLUMN before v3.25, so we simulate a
+# rename by DROP+recreate. The watcher must surface it as exactly one
+# column_removed + one column_added in the SAME diff, and must flag
+# affected_definitions only on the removed (old) column name.
+# ══════════════════════════════════════════════════════════════════
+section("[E] DriftWatcher — Column Rename Detection")
+
+RENAME_DB_FILE = str(_TMP / "dd_phase6_rename.db")
+if Path(RENAME_DB_FILE).exists():
+    Path(RENAME_DB_FILE).unlink()
+RENAME_DB_URL = f"sqlite:///{RENAME_DB_FILE}"
+
+# Seed table with original column name
+_rn_conn = sqlite3.connect(RENAME_DB_FILE)
+_rn_conn.executescript("""
+    CREATE TABLE Sales (
+        SalesKey    INTEGER PRIMARY KEY,
+        GrossSales  REAL,
+        Channel     TEXT
+    );
+    INSERT INTO Sales VALUES (1, 500.0, 'store');
+""")
+_rn_conn.commit()
+_rn_conn.close()
+
+# Seed a definition whose sql_expr references the old column
+upsert_definition(
+    name="gross_sales_def",
+    description="Total sales before returns",
+    sql_expr="SELECT SUM(GrossSales) FROM Sales",
+    approved=True,
+    reason="rename test"
+)
+
+# E1 — baseline snapshot (no events)
+get_engine.cache_clear()
+ev_base = drift_watcher.snapshot_and_diff(RENAME_DB_URL)
+check("E1  Baseline snapshot is clean (0 events)",
+      len(ev_base) == 0, f"events={ev_base}")
+
+# Simulate rename: GrossSales -> NetSales via DROP+recreate
+_rn2 = sqlite3.connect(RENAME_DB_FILE)
+_rn2.executescript("""
+    ALTER TABLE Sales RENAME TO Sales_old;
+    CREATE TABLE Sales (
+        SalesKey  INTEGER PRIMARY KEY,
+        NetSales  REAL,
+        Channel   TEXT
+    );
+    INSERT INTO Sales SELECT SalesKey, GrossSales, Channel FROM Sales_old;
+    DROP TABLE Sales_old;
+""")
+_rn2.commit()
+_rn2.close()
+get_engine.cache_clear()
+
+ev_rename = drift_watcher.snapshot_and_diff(RENAME_DB_URL)
+removed = [e for e in ev_rename if e.get("type") == "column_removed"]
+added   = [e for e in ev_rename if e.get("type") == "column_added"]
+
+# E2 — exactly one column_removed
+check("E2  Rename produces exactly one column_removed event",
+      len(removed) == 1, f"removed_cols={[e.get('column') for e in removed]}")
+
+# E3 — removed column name is the old name
+old_col = removed[0].get("column") if removed else ""
+check("E3  Removed column is the old name 'GrossSales'",
+      old_col == "GrossSales", f"column={old_col}")
+
+# E4 — exactly one column_added
+check("E4  Rename produces exactly one column_added event",
+      len(added) == 1, f"added_cols={[e.get('column') for e in added]}")
+
+# E5 — added column name is the new name
+new_col = added[0].get("column") if added else ""
+check("E5  Added column is the new name 'NetSales'",
+      new_col == "NetSales", f"column={new_col}")
+
+# E6 — affected_definitions populated on the removed event (old col in sql_expr)
+aff_raw = (removed[0] if removed else {}).get("affected_definitions")
+aff = json.loads(aff_raw) if aff_raw else []
+check("E6  affected_definitions on column_removed includes 'gross_sales_def'",
+      "gross_sales_def" in aff, f"affected={aff}")
+
+# E7 — column_added event carries NO affected_definitions (new name unknown)
+check("E7  column_added event has no affected_definitions (new name not in defs)",
+      (added[0] if added else {}).get("affected_definitions") is None,
+      f"aff={(added[0] if added else {}).get('affected_definitions')}")
+
+# E8 — both events reference the correct table
+check("E8  Both rename events reference table 'Sales'",
+      all(e.get("table") == "Sales" for e in removed + added),
+      f"tables={[e.get('table') for e in removed + added]}")
+
+# E9 — re-snapshot after rename is stable (no new events)
+ev_stable = drift_watcher.snapshot_and_diff(RENAME_DB_URL)
+stable = [e for e in ev_stable if e.get("type") != "error"]
+check("E9  Re-snapshot after rename is stable (0 new events)",
+      len(stable) == 0, f"events={ev_stable}")
+
+
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
 total   = len(results)
 passed  = sum(1 for r in results if r[0] == PASS)
