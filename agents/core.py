@@ -17,6 +17,7 @@ from store.conversation import get_conversation_context, add_message
 from embeddings.engine import embed, cosine_similarity
 from agents.llm_router import call_llm
 from agents.sql_validator import validate_sql
+from db.connection import get_engine, execute_query, inspect_schema, resolve_url
 from config import settings
 
 
@@ -153,17 +154,25 @@ conflict_agent = ConflictAgent()
 # ── 3. DRIFT WATCHER ─────────────────────────────────────────────────────────
 class DriftWatcher:
     def snapshot_and_diff(self, db_path: str) -> list[dict]:
+        """
+        Snapshot the schema of a data database and return change events.
+
+        Accepts a SQLAlchemy connection URL **or** a bare SQLite file path
+        (auto-converted via resolve_url for backward compatibility).
+
+        Works with SQLite, PostgreSQL, and MySQL via SQLAlchemy Inspector.
+        """
         events = []
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-            for table_row in tables:
-                table = table_row["name"]
-                if table.startswith("sqlite_"):
-                    continue
-                cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
-                current_cols = [{"name": c["name"], "type": c["type"], "notnull": c["notnull"]} for c in cols]
+            engine = get_engine(resolve_url(db_path))
+            schema = inspect_schema(engine)  # {table: [col_info, ...]}
+
+            for table, columns in schema.items():
+                # Normalise to the same shape used by save_schema_snapshot
+                current_cols = [
+                    {"name": c["name"], "type": c["type"], "notnull": not c["nullable"]}
+                    for c in columns
+                ]
                 changed, prev_cols = save_schema_snapshot(table, current_cols)
                 if changed and prev_cols:
                     prev_names = {c["name"] for c in prev_cols}
@@ -173,12 +182,13 @@ class DriftWatcher:
                         detail = f"Column '{col}' removed from '{table}'"
                         log_drift(table, "column_removed", detail, affected)
                         events.append({"type": "column_removed", "table": table,
-                                       "column": col, "affected_definitions": affected, "detail": detail})
+                                       "column": col, "affected_definitions": affected,
+                                       "detail": detail})
                     for col in curr_names - prev_names:
                         detail = f"Column '{col}' added to '{table}'"
                         log_drift(table, "column_added", detail)
-                        events.append({"type": "column_added", "table": table, "column": col, "detail": detail})
-            conn.close()
+                        events.append({"type": "column_added", "table": table,
+                                       "column": col, "detail": detail})
         except Exception as e:
             events.append({"type": "error", "detail": str(e)})
         return events
@@ -348,14 +358,14 @@ RULES (strict):
         except Exception:
             pass  # memory failure never blocks the query
 
-    def _execute(self, sql: str, db_path: str) -> dict:
-        try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(sql).fetchmany(100)
-            conn.close()
-            return {"rows": [dict(r) for r in rows], "row_count": len(rows)}
-        except Exception as e:
-            return {"error": str(e), "sql_attempted": sql}
+    def _execute(self, sql: str, db_url: str) -> dict:
+        """
+        Execute *sql* against the data database.
+
+        Accepts a SQLAlchemy URL **or** a bare SQLite file path.
+        Results are capped at 100 rows to avoid memory issues.
+        """
+        engine = get_engine(resolve_url(db_url))
+        return execute_query(engine, sql, max_rows=100)
 
 query_agent = QueryAgent()

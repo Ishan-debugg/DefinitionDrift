@@ -36,9 +36,18 @@ OPTIMIZER_TOP_K = 4                    # max definitions to inject per query
 
 # ── DATABASES ──────────────────────────────────────────────────────────────────
 DEFINITION_DB  = ROOT / "definitiondrift.db"
-DATA_DB_PATH   = Path(os.getenv("DATA_DB_PATH", str(ROOT / "data" / "contoso.db")))
-EMBEDDING_CACHE = ROOT / "embeddings" / "cache.db"
 CHECKPOINT_DB  = ROOT / "data" / "checkpoints.db"   # LangGraph SqliteSaver — survives restarts
+EMBEDDING_CACHE = ROOT / "embeddings" / "cache.db"
+
+# Data DB — accepts any SQLAlchemy connection string (SQLite, Postgres, MySQL).
+# DATA_DB_URL takes priority over the legacy DATA_DB_PATH.
+#
+# Examples:
+#   SQLite  : sqlite:///./data/contoso.db   (default — local dev)
+#   Postgres: postgresql+psycopg2://user:password@localhost:5432/contoso
+#   MySQL   : mysql+pymysql://user:password@localhost:3306/contoso
+DATA_DB_URL    = os.getenv("DATA_DB_URL", "")
+DATA_DB_PATH   = Path(os.getenv("DATA_DB_PATH", str(ROOT / "data" / "contoso.db")))
 
 # ── API ───────────────────────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")

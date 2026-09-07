@@ -19,6 +19,13 @@ sqlglot>=23.0.0
 # Embeddings (local, free, runs on CPU — highly recommended)
 sentence-transformers>=3.0.0
 
+# Multi-database connection abstraction (SQLite, Postgres, MySQL)
+sqlalchemy>=2.0.0
+# Optional dialect drivers — install whichever you need:
+#   pip install psycopg2-binary       ← PostgreSQL
+#   pip install pymysql               ← MySQL / MariaDB
+#   pip install pyodbc                ← MS SQL Server
+
 # Scheduling (HOTL drift digest)
 apscheduler>=3.10.0
 

@@ -34,11 +34,14 @@ from agents.core import query_agent, conflict_agent, drift_watcher
 from agents.orchestrator import run_query_pipeline
 from agents.llm_router import get_usage_stats
 from embeddings.engine import cache_stats, get_active_model
+from db.connection import resolve_url, get_engine
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
 init_conversation_db()
-DATA_DB = os.getenv("DATA_DB_PATH", str(Path(__file__).parent.parent / "data" / "contoso.db"))
+# Resolve the data-DB connection string — accepts SQLAlchemy URL or bare path.
+# Priority: DATA_DB_URL env var > DATA_DB_PATH env var > default SQLite file.
+DATA_DB = resolve_url(os.getenv("DATA_DB_URL") or os.getenv("DATA_DB_PATH", ""))
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dd-dev-token-change-in-prod")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -336,9 +339,13 @@ def stats():
         "embedding_cache": emb,
         "embedding_model": get_active_model(),
         "llm_usage": usage,
-        "data_db": {"path": DATA_DB, "exists": Path(DATA_DB).exists(),
-                    "size_mb": round(Path(DATA_DB).stat().st_size/1024/1024,2)
-                    if Path(DATA_DB).exists() else 0},
+        "data_db": {
+            "url": DATA_DB,
+            "dialect": get_engine(DATA_DB).dialect.name,
+            "exists": (Path(DATA_DB.replace("sqlite:///", "")).exists()
+                       if DATA_DB.startswith("sqlite")
+                       else True),
+        },
     }
 
 # ── Conversation memory ──────────────────────────────────────────────────────
