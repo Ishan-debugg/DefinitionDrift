@@ -35,6 +35,8 @@ from agents.orchestrator import run_query_pipeline
 from agents.llm_router import get_usage_stats
 from embeddings.engine import cache_stats, get_active_model
 from db.connection import resolve_url, get_engine
+from config.settings import DRIFT_CRON_SCHEDULE, DRIFT_WEBHOOK_URL
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
@@ -67,6 +69,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def send_drift_digest():
+    if not DRIFT_WEBHOOK_URL:
+        return
+    drifts = get_unnotified_drift()
+    if not drifts:
+        return
+    
+    lines = [f"🚨 *Schema Drift Detected* ({len(drifts)} events)"]
+    for d in drifts:
+        lines.append(f"- *{d['table_name']}*: {d['change_type']} -> {d['detail']}")
+    
+    import urllib.request
+    payload = {"text": "\n".join(lines)}
+    try:
+        req = urllib.request.Request(
+            DRIFT_WEBHOOK_URL, 
+            data=json.dumps(payload).encode(), 
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=10)
+        mark_drift_notified([d["id"] for d in drifts])
+    except Exception as e:
+        print(f"[Webhook] Failed to send drift digest: {e}")
+
+@app.on_event("startup")
+def start_scheduler():
+    scheduler = BackgroundScheduler()
+    # DRIFT_CRON_SCHEDULE default is "0 9 * * 1" (Mon 9am)
+    scheduler.add_job(send_drift_digest, 'cron', day_of_week='mon', hour=9, minute=0)
+    scheduler.start()
+    print("[Scheduler] Started background jobs (Drift Digest)")
 
 # ── Query history store (in-memory + SQLite backed) ───────────────────────────
 import sqlite3
@@ -247,7 +281,23 @@ async def run_query(request: Request, body: QueryRequest):
 
 @app.post("/api/feedback")
 def submit_feedback(body: FeedbackRequest):
-    # store feedback — in prod, write to feedback table
+    if body.rating == -1:
+        # Find query to link to
+        history = _get_history(limit=500)
+        query = next((r for r in history if r["id"] == body.query_id), None)
+        if query:
+            question = query.get("question", "Unknown")
+            defs_used = query.get("definitions_used", "[]")
+            
+            # Enqueue as a conflict for human review
+            enqueue_conflict(
+                question_a=question,
+                question_b=f"User feedback: {body.comment or 'Thumbs down'}",
+                def_a=defs_used,
+                def_b=None,
+                similarity=0.0
+            )
+            
     return {"status": "ok", "message": "Feedback recorded"}
 
 # ── Query history ─────────────────────────────────────────────────────────────
