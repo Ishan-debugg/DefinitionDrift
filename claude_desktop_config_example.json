@@ -6,7 +6,8 @@
         "C:\\Users\\91958\\Desktop\\DefinitionDrift\\mcp_server\\server.py"
       ],
       "env": {
-        "DATA_DB_PATH": "C:\\Users\\91958\\Desktop\\DefinitionDrift\\data\\contoso.db"
+        "ANTHROPIC_API_KEY": "YOUR_KEY_HERE",
+        "DATA_DB_PATH": "/tmp/definitiondrift_demo.db"
       }
     }
   }

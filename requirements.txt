@@ -1,30 +1,28 @@
-# DefinitionDrift — Phase 1 requirements
-# Zero purchase — all free to use within Anthropic free tier
+# DefinitionDrift — Complete requirements
+# Zero purchase — all free providers
 
-# Core LLM
-anthropic>=0.40.0
+# Core LLM + free providers
+openai>=1.50.0              # OpenAI-compat client for Groq, Cerebras, OpenRouter
+google-generativeai>=0.8.0  # Gemini Flash (free, 1500 req/day)
 
 # Agent orchestration
 langgraph>=0.2.0
-langgraph-checkpoint-sqlite>=0.1.0  # persistent HITL state across restarts
+langgraph-checkpoint-sqlite>=0.1.0
 
 # API server
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 pydantic>=2.0.0
+slowapi>=0.1.9              # rate limiting
 
-# SQL parsing + schema diffing
+# SQL parsing + validation
 sqlglot>=23.0.0
 
-# Embeddings (local, free, runs on CPU — highly recommended)
+# Embeddings (local, free, runs on CPU)
 sentence-transformers>=3.0.0
 
-# Multi-database connection abstraction (SQLite, Postgres, MySQL)
+# Multi-database support
 sqlalchemy>=2.0.0
-# Optional dialect drivers — install whichever you need:
-#   pip install psycopg2-binary       ← PostgreSQL
-#   pip install pymysql               ← MySQL / MariaDB
-#   pip install pyodbc                ← MS SQL Server
 
 # Scheduling (HOTL drift digest)
 apscheduler>=3.10.0
@@ -32,9 +30,12 @@ apscheduler>=3.10.0
 # MCP server
 mcp>=1.0.0
 
+# HTTP requests (for webhook)
+httpx>=0.27.0
+
 # Utilities
 python-dotenv>=1.0.0
 
-# Dev / testing only
-httpx>=0.27.0
-slowapi>=0.1.9
+# Optional DB drivers — uncomment what you need:
+# psycopg2-binary    # PostgreSQL
+# pymysql            # MySQL / MariaDB
