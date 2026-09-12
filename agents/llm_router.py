@@ -280,6 +280,24 @@ def call_llm(system: str, user: str,
     }), "offline"
 
 
+def call_llm_stream(system, user, task="sql_generation", max_tokens=512):
+    """Yields text chunks as they arrive from Groq."""
+    cfg = PROVIDERS.get("groq", {})
+    key = os.getenv(cfg.get("api_key_env",""), "")
+    if not key:
+        yield json.dumps({"sql":None,"confidence":"low","explanation":"No API key"})
+        return
+    client = OpenAI(api_key=key, base_url=cfg["base_url"])
+    stream = client.chat.completions.create(
+        model=cfg["model"], temperature=0.0, max_tokens=max_tokens, stream=True,
+        messages=[{"role":"system","content":system},{"role":"user","content":user}]
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content or ""
+        if delta:
+            yield delta
+
+
 if __name__ == "__main__":
     print("=== LLM Router Test ===\n")
     system = "You are a helpful assistant. Reply in one sentence."

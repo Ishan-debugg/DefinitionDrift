@@ -143,10 +143,10 @@ class ConflictAgent:
         if not all_defs:
             return None
         q_vec, _ = embed(question)
+        # use optimizer's pre-computed vectors
         best_score, best_def = 0.0, None
         for d in all_defs:
-            d_vec, _ = embed(f"{d['name']} {d['description']}")
-            score = cosine_similarity(q_vec, d_vec)
+            score = cosine_similarity(q_vec, optimizer._get_def_vec(d))  # ← reuse cache
             if score > best_score:
                 best_score, best_def = score, d
         if best_score >= self.CONFLICT_THRESHOLD and best_def:
