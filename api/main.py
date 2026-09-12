@@ -110,12 +110,17 @@ HIST_DB = Path(__file__).parent.parent / "data" / "query_history.db"
 def _init_hist():
     HIST_DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(HIST_DB)
-    c.execute("""CREATE TABLE IF NOT EXISTS query_history (
-        id TEXT PRIMARY KEY, question TEXT, status TEXT,
-        sql_result TEXT, provider TEXT, definitions_used TEXT,
-        latency_ms INTEGER, session_id TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )""")
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS query_history (
+            id TEXT PRIMARY KEY, question TEXT, status TEXT,
+            sql_result TEXT, provider TEXT, definitions_used TEXT,
+            latency_ms INTEGER, session_id TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_qh_session ON query_history(session_id);
+        CREATE INDEX IF NOT EXISTS idx_qh_status  ON query_history(status);
+        CREATE INDEX IF NOT EXISTS idx_qh_created ON query_history(created_at DESC);
+    """)
     c.commit(); c.close()
 
 _init_hist()
