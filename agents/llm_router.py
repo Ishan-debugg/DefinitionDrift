@@ -44,7 +44,7 @@ PROVIDERS = {
     "groq": {
         "base_url":  "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "model":     "openai/gpt-oss-120b",
+        "model":     "llama-3.3-70b-versatile",
         "rpm":       30,
         "rpd":       1000,
         "best_for":  ["sql_generation", "structured_output"],
@@ -60,7 +60,7 @@ PROVIDERS = {
     "openrouter": {
         "base_url":  "https://openrouter.ai/api/v1",
         "api_key_env": "OPENROUTER_API_KEY",
-        "model":     "meta-llama/llama-3.3-70b-instruct:free",
+        "model":     "meta-llama/llama-3.3-70b-instruct",
         "rpm":       20,
         "rpd":       50,
         "best_for":  ["fallback"],

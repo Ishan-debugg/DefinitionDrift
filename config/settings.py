@@ -7,8 +7,10 @@ Central config for DefinitionDrift — all tunable values in one place
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).parent.parent
+load_dotenv(dotenv_path=ROOT / ".env")
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
@@ -19,7 +21,7 @@ QUERY_MODEL_FAST    = "claude-haiku-4-5-20251001"   # $1/$5 per MTok
 QUERY_MODEL_SMART   = "claude-sonnet-4-6"            # $3/$15 per MTok — for low-confidence queries
 LOW_CONFIDENCE_THRESHOLD = 0.60                      # below this → escalate to Sonnet
 
-MAX_TOKENS_QUERY    = 512
+MAX_TOKENS_QUERY    = 1024
 MAX_TOKENS_EXPLAIN  = 256
 
 # ── EMBEDDING ──────────────────────────────────────────────────────────────────

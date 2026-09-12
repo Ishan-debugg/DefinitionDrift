@@ -225,7 +225,8 @@ RULES (strict):
 3. Never use column or table names not listed in SCHEMA above.
 4. Use YYYYMMDD integer format for DateKey comparisons (e.g. 20080101).
 5. Join DimDate on FactSales.DateKey = DimDate.DateKey for date filtering.
-6. Return ONLY this exact JSON — no markdown, no extra text:
+6. ALWAYS fully qualify column names with their table names (e.g., FactSales.StoreKey instead of StoreKey) to avoid ambiguous column errors in JOINs.
+7. Return ONLY this exact JSON — no markdown, no extra text:
 {
   "sql": "<valid SQLite SQL or null>",
   "used_definitions": ["names of definitions used"],
