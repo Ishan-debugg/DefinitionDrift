@@ -30,6 +30,7 @@ from store.db import (
 from store.conversation import (
     get_session_messages, clear_session, session_summary, init_conversation_db
 )
+from store.query_log import init_query_log, save_query, get_query_history as _get_history
 from agents.core import query_agent, conflict_agent, drift_watcher
 from agents.orchestrator import run_query_pipeline
 from agents.llm_router import get_usage_stats
@@ -41,10 +42,29 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
 init_conversation_db()
+init_query_log()
 # Resolve the data-DB connection string — accepts SQLAlchemy URL or bare path.
 # Priority: DATA_DB_URL env var > DATA_DB_PATH env var > default SQLite file.
 DATA_DB = resolve_url(os.getenv("DATA_DB_URL") or os.getenv("DATA_DB_PATH", ""))
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dd-dev-token-change-in-prod")
+
+# ── Admin token — secure startup validation ───────────────────────────────────
+_INSECURE_DEFAULT = "dd-dev-token-change-in-prod"
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+_env = os.getenv("ENV", "dev").lower()
+
+if not ADMIN_TOKEN or ADMIN_TOKEN == _INSECURE_DEFAULT:
+    if _env == "production":
+        raise RuntimeError(
+            "[Security] ADMIN_TOKEN is missing or set to the insecure default. "
+            "Set a strong secret in your .env before starting in production."
+        )
+    else:
+        # Dev/staging: allow startup but warn loudly
+        ADMIN_TOKEN = _INSECURE_DEFAULT
+        print(
+            "\n[WARNING] ADMIN_TOKEN is not set or is the insecure default. "
+            "This is fine for local dev, but MUST be changed before deploying to production.\n"
+        )
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
@@ -102,47 +122,8 @@ def start_scheduler():
     scheduler.start()
     print("[Scheduler] Started background jobs (Drift Digest)")
 
-# ── Query history store (in-memory + SQLite backed) ───────────────────────────
-import sqlite3
-
-HIST_DB = Path(__file__).parent.parent / "data" / "query_history.db"
-
-def _init_hist():
-    HIST_DB.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(HIST_DB)
-    c.executescript("""
-        CREATE TABLE IF NOT EXISTS query_history (
-            id TEXT PRIMARY KEY, question TEXT, status TEXT,
-            sql_result TEXT, provider TEXT, definitions_used TEXT,
-            latency_ms INTEGER, session_id TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_qh_session ON query_history(session_id);
-        CREATE INDEX IF NOT EXISTS idx_qh_status  ON query_history(status);
-        CREATE INDEX IF NOT EXISTS idx_qh_created ON query_history(created_at DESC);
-    """)
-    c.commit(); c.close()
-
-_init_hist()
-
-def _save_query(qid, question, status, sql_result, provider, defs, latency_ms, session_id):
-    c = sqlite3.connect(HIST_DB)
-    c.execute("INSERT OR REPLACE INTO query_history VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
-              (qid, question, status, json.dumps(sql_result),
-               provider, json.dumps(defs), latency_ms, session_id))
-    c.commit(); c.close()
-
-def _get_history(session_id: str = None, limit: int = 50):
-    c = sqlite3.connect(HIST_DB)
-    c.row_factory = sqlite3.Row
-    if session_id:
-        rows = c.execute("SELECT * FROM query_history WHERE session_id=? ORDER BY created_at DESC LIMIT ?",
-                         (session_id, limit)).fetchall()
-    else:
-        rows = c.execute("SELECT * FROM query_history ORDER BY created_at DESC LIMIT ?",
-                         (limit,)).fetchall()
-    c.close()
-    return [dict(r) for r in rows]
+# ── Query history — delegated to store.query_log ─────────────────────────────
+# (init_query_log already called above at startup)
 
 # ── WebSocket connection manager ──────────────────────────────────────────────
 class ConnectionManager:
@@ -266,8 +247,8 @@ async def run_query(request: Request, body: QueryRequest):
     provider = sql_r.get("provider_used", "none") if sql_r else "conflict"
     defs = sql_r.get("used_definitions", []) if sql_r else []
 
-    _save_query(qid, body.question, result["status"],
-                sql_r, provider, defs, latency, session_id)
+    save_query(qid, body.question, result["status"],
+               sql_r, provider, defs, latency, session_id)
 
     # broadcast to all open WebSocket clients
     await manager.broadcast({
@@ -376,13 +357,12 @@ def stats():
     emb       = cache_stats()
     usage     = get_usage_stats()
 
-    # query history stats
-    c = sqlite3.connect(HIST_DB)
-    c.row_factory = sqlite3.Row
-    total_q = c.execute("SELECT COUNT(*) FROM query_history").fetchone()[0]
-    ok_q    = c.execute("SELECT COUNT(*) FROM query_history WHERE status='ok'").fetchone()[0]
-    avg_lat = c.execute("SELECT AVG(latency_ms) FROM query_history WHERE status='ok'").fetchone()[0]
-    c.close()
+    # query history stats — derived from store.query_log
+    _hist = _get_history(limit=10_000)  # cap at 10k for stats aggregation
+    total_q = len(_hist)
+    ok_q    = sum(1 for r in _hist if r.get("status") == "ok")
+    lat_vals = [r["latency_ms"] for r in _hist if r.get("status") == "ok" and r.get("latency_ms")]
+    avg_lat  = (sum(lat_vals) / len(lat_vals)) if lat_vals else 0
 
     return {
         "definitions": {"total": len(all_defs), "approved": len(approved),
