@@ -86,6 +86,24 @@ def _parse_llm_response(raw: str) -> dict:
 class TokenOptimizer:
     SIMILARITY_THRESHOLD = 0.35
     TOP_K = 4
+    
+    def __init__(self):
+        self._def_cache: dict[str, list[float]] = {}  # def_id → vector
+    
+    def _get_def_vec(self, d: dict) -> list[float]:
+        key = f"{d['id']}v{d['version']}"
+        if key not in self._def_cache:
+            vec, _ = embed(f"{d['name']} {d['description']}")
+            self._def_cache[key] = vec
+        return self._def_cache[key]
+    
+    def select_relevant(self, question, approved_only=True):
+        defs = get_all_definitions(approved_only=approved_only)
+        if not defs: return []
+        q_vec, _ = embed(question)
+        scored = [(cosine_similarity(q_vec, self._get_def_vec(d)), d) for d in defs]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [d for s, d in scored[:self.TOP_K] if s >= self.THRESHOLD]
 
     def select_relevant(self, question: str, approved_only: bool = True) -> list[dict]:
         all_defs = get_all_definitions(approved_only=approved_only)
@@ -111,6 +129,7 @@ class TokenOptimizer:
                 lines.append(f"  SQL reference: `{d['sql_expr']}`")
             lines.append("")
         return "\n".join(lines), relevant
+        
 
 optimizer = TokenOptimizer()
 
