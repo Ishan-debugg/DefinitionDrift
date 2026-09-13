@@ -4,10 +4,12 @@ agents/core.py  (Phase 3 — multi-turn memory + SQL validation)
 Four agents + two new capabilities:
   - Multi-turn conversation memory (session-scoped)
   - SQL validation via sqlglot AST + Contoso schema check
+  - Dynamic schema introspection (zero-definition mode)
 """
 
-import json, sqlite3, re
+import json, sqlite3, re, os
 from typing import Optional
+from pathlib import Path
 
 from store.db import (
     get_all_definitions, enqueue_conflict,
@@ -84,37 +86,27 @@ def _parse_llm_response(raw: str) -> dict:
 
 # ── 1. TOKEN OPTIMIZER ───────────────────────────────────────────────────────
 class TokenOptimizer:
-    SIMILARITY_THRESHOLD = 0.35
-    TOP_K = 4
-    
+    SIMILARITY_THRESHOLD = settings.OPTIMIZER_SIMILARITY_THRESHOLD  # 0.45 from config
+    TOP_K = settings.OPTIMIZER_TOP_K                                # 4 from config
+
     def __init__(self):
         self._def_cache: dict[str, list[float]] = {}  # def_id → vector
-    
+
     def _get_def_vec(self, d: dict) -> list[float]:
+        """Return cached embedding vector for a definition, computing on first access."""
         key = f"{d['id']}v{d['version']}"
         if key not in self._def_cache:
             vec, _ = embed(f"{d['name']} {d['description']}")
             self._def_cache[key] = vec
         return self._def_cache[key]
-    
-    def select_relevant(self, question, approved_only=True):
-        defs = get_all_definitions(approved_only=approved_only)
-        if not defs: return []
-        q_vec, _ = embed(question)
-        scored = [(cosine_similarity(q_vec, self._get_def_vec(d)), d) for d in defs]
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [d for s, d in scored[:self.TOP_K] if s >= self.THRESHOLD]
 
     def select_relevant(self, question: str, approved_only: bool = True) -> list[dict]:
+        """Return top-K definitions above the similarity threshold, using cached vectors."""
         all_defs = get_all_definitions(approved_only=approved_only)
         if not all_defs:
             return []
         q_vec, _ = embed(question)
-        scored = []
-        for d in all_defs:
-            d_vec, _ = embed(f"{d['name']} {d['description']}")
-            score = cosine_similarity(q_vec, d_vec)
-            scored.append((score, d))
+        scored = [(cosine_similarity(q_vec, self._get_def_vec(d)), d) for d in all_defs]
         scored.sort(key=lambda x: x[0], reverse=True)
         return [d for score, d in scored[:self.TOP_K] if score >= self.SIMILARITY_THRESHOLD]
 
@@ -129,9 +121,60 @@ class TokenOptimizer:
                 lines.append(f"  SQL reference: `{d['sql_expr']}`")
             lines.append("")
         return "\n".join(lines), relevant
-        
+
 
 optimizer = TokenOptimizer()
+
+
+# ── SCHEMA INTROSPECTOR ──────────────────────────────────────────────────────
+class SchemaIntrospector:
+    """Reads the real database schema and builds a dynamic system prompt section.
+
+    This allows the QueryAgent to answer ANY question about the database
+    without requiring pre-defined metric definitions — the LLM sees the
+    actual tables, columns, types, and sample data.
+    """
+
+    def __init__(self):
+        self._schema_block: str = ""
+        self._tables: dict[str, list[dict]] = {}
+
+    def introspect(self, db_url: str) -> str:
+        """Introspect the database and cache the schema block."""
+        try:
+            engine = get_engine(resolve_url(db_url))
+            self._tables = inspect_schema(engine)
+            self._schema_block = self._build_schema_block(engine)
+            print(f"[SchemaIntrospector] Loaded {len(self._tables)} tables from {engine.dialect.name}")
+        except Exception as e:
+            print(f"[SchemaIntrospector] Failed to introspect: {e} — using hardcoded fallback")
+            self._schema_block = ""  # will fall through to hardcoded
+        return self._schema_block
+
+    def _build_schema_block(self, engine) -> str:
+        """Build a detailed schema description from introspected metadata."""
+        lines = ["SCHEMA (auto-introspected from live database):"]
+        for table_name, columns in sorted(self._tables.items()):
+            if table_name in ("sqlite_sequence",):  # skip internal tables
+                continue
+            # Get row count
+            try:
+                result = execute_query(engine, f"SELECT COUNT(*) AS cnt FROM {table_name}", max_rows=1)
+                row_count = result.get("rows", [{}])[0].get("cnt", "?")
+            except Exception:
+                row_count = "?"
+            col_names = [c["name"] for c in columns]
+            lines.append(f"  {table_name} ({row_count} rows) — {', '.join(col_names)}")
+        return "\n".join(lines)
+
+    def get_schema_block(self) -> str:
+        return self._schema_block
+
+    def get_tables(self) -> dict[str, list[dict]]:
+        return self._tables
+
+
+schema_introspector = SchemaIntrospector()
 
 
 # ── 2. CONFLICT AGENT ────────────────────────────────────────────────────────
@@ -221,39 +264,63 @@ drift_watcher = DriftWatcher()
 
 
 # ── 4. QUERY AGENT ───────────────────────────────────────────────────────────
-class QueryAgent:
-    SYSTEM_PROMPT = """\
-You are a data analyst for a Contoso Retail SQLite database.
 
+# Hardcoded fallback schema — used when dynamic introspection hasn't run yet
+_FALLBACK_SCHEMA = """\
 SCHEMA (Contoso tables available):
   FactSales        — SalesKey, DateKey, StoreKey, ProductKey, CustomerKey,
-                     UnitCost, UnitPrice, SalesQuantity, ReturnQuantity,
+                     ChannelKey, UnitCost, UnitPrice, SalesQuantity, ReturnQuantity,
                      ReturnAmount, DiscountAmount, TotalCost, SalesAmount, Margin
-  FactOnlineSales  — same columns, online channel only (StoreKey=306)
-  DimProduct       — ProductKey, ProductName, BrandName, UnitCost, UnitPrice, Status
-  DimStore         — StoreKey, StoreName, StoreType, Status, GeographyKey
-  DimCustomer      — CustomerKey, FirstName, LastName, AnnualIncome, Occupation, Gender
-  DimDate          — DateKey (YYYYMMDD int), CalendarYear, CalendarMonth,
-                     CalendarQuarter, FiscalYear, FiscalMonth, FiscalQuarter
-  DimProductCategory      — ProductCategoryKey, ProductCategoryName
+  FactOnlineSales  — OnlineSalesKey, DateKey, StoreKey, ProductKey, CustomerKey,
+                     PromotionKey, UnitCost, UnitPrice, SalesQuantity, ReturnQuantity,
+                     ReturnAmount, DiscountAmount, TotalCost, SalesAmount, Margin
+  DimProduct       — ProductKey, ProductName, ProductLabel, ProductDescription,
+                     ProductSubcategoryKey, BrandName, UnitCost, UnitPrice, Status
+  DimStore         — StoreKey, StoreName, StoreType, StoreManager, StorePhone,
+                     SellingAreaSize, OpenDate, Status, GeographyKey
+  DimCustomer      — CustomerKey, FirstName, LastName, BirthDate, MaritalStatus,
+                     Gender, EmailAddress, AnnualIncome, TotalChildren,
+                     EducationLevel, Occupation, HouseOwnerFlag, CustomerType, GeographyKey
+  DimDate          — DateKey (YYYYMMDD int), FullDateLabel, CalendarYear, CalendarQuarter,
+                     CalendarMonth, CalendarWeek, DayNumberOfWeek, DayNameOfWeek,
+                     IsWeekend, FiscalYear, FiscalQuarter, FiscalMonth
+  DimProductCategory      — ProductCategoryKey, ProductCategoryName, ProductCategoryLabel, Description
   DimProductSubcategory   — ProductSubcategoryKey, ProductSubcategoryName, ProductCategoryKey
+  DimGeography    — GeographyKey, GeographyType, ContinentName, CityName, StateName, RegionCountryName"""
+
+_SYSTEM_PROMPT_TEMPLATE = """\
+You are a data analyst for a Contoso Retail SQLite database.
+
+{schema_block}
 
 RULES (strict):
-1. Use approved metric definitions EXACTLY — never rewrite their SQL.
+1. If approved metric definitions are provided, use their SQL EXACTLY — never rewrite.
 2. If the question maps to an approved definition, embed its SQL as a CTE.
-3. Never use column or table names not listed in SCHEMA above.
-4. Use YYYYMMDD integer format for DateKey comparisons (e.g. 20080101).
-5. Join DimDate on FactSales.DateKey = DimDate.DateKey for date filtering.
-6. ALWAYS fully qualify column names with their table names (e.g., FactSales.StoreKey instead of StoreKey) to avoid ambiguous column errors in JOINs.
-7. Return ONLY this exact JSON — no markdown, no extra text:
-{
+3. If NO definitions are provided, generate SQL directly from the SCHEMA above.
+   You do NOT need definitions to answer — the schema is sufficient.
+4. Never use column or table names not listed in SCHEMA above.
+5. Use YYYYMMDD integer format for DateKey comparisons (e.g. 20080101).
+6. Join DimDate on FactSales.DateKey = DimDate.DateKey for date filtering.
+7. ALWAYS fully qualify column names with their table names
+   (e.g., FactSales.StoreKey instead of StoreKey) to avoid ambiguous column errors.
+8. Return ONLY this exact JSON — no markdown, no extra text:
+{{
   "sql": "<valid SQLite SQL or null>",
-  "used_definitions": ["names of definitions used"],
+  "used_definitions": ["names of definitions used, or empty list if none"],
   "confidence": "high|medium|low",
   "explanation": "one sentence describing what this measures",
   "warning": "<caveat or null>"
-}
-7. temperature=0 — be deterministic. Same question must produce identical SQL."""
+}}
+9. temperature=0 — be deterministic. Same question must produce identical SQL."""
+
+
+class QueryAgent:
+
+    def _build_system_prompt(self) -> str:
+        """Build the system prompt with dynamic or fallback schema."""
+        dynamic = schema_introspector.get_schema_block()
+        schema_block = dynamic if dynamic else _FALLBACK_SCHEMA
+        return _SYSTEM_PROMPT_TEMPLATE.format(schema_block=schema_block)
 
     def run(
         self,
@@ -261,6 +328,12 @@ RULES (strict):
         data_db_path: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> dict:
+        # ── Ensure schema introspection has run ──────────────────────────────
+        if not schema_introspector.get_schema_block() and data_db_path:
+            schema_introspector.introspect(data_db_path)
+
+        system_prompt = self._build_system_prompt()
+
         # ── Pass 1: build conversation history block ──────────────────────────
         history_block = ""
         if session_id:
@@ -282,12 +355,19 @@ RULES (strict):
             parts.append(history_block)
         if context_block:
             parts.append(context_block)
+        else:
+            # Zero-definition mode: tell the LLM it can answer from schema alone
+            parts.append(
+                "## Note\n"
+                "No approved metric definitions matched this question. "
+                "Generate SQL directly from the database schema provided above."
+            )
         parts.append(f"## Current question\n{question}")
         user_msg = "\n\n".join(parts)
 
         # ── Pass 3: generate SQL via free LLM ─────────────────────────────────
         raw, provider = call_llm(
-            system=self.SYSTEM_PROMPT, user=user_msg,
+            system=system_prompt, user=user_msg,
             task="sql_generation", max_tokens=512,
         )
 
@@ -306,7 +386,7 @@ RULES (strict):
                 f"[QueryAgent] confidence=low — escalating to {settings.QUERY_MODEL_SMART}"
             )
             raw2, provider2 = call_llm(
-                system=self.SYSTEM_PROMPT,
+                system=system_prompt,
                 user=user_msg,
                 task="sql_generation_smart",
                 max_tokens=settings.MAX_TOKENS_QUERY,

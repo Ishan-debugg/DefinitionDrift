@@ -272,28 +272,28 @@ def mark_drift_notified(ids: list[int]):
 
 if __name__ == "__main__":
     init_db()
-    # seed some definitions for testing
+    # seed Contoso-compatible definitions for testing
     upsert_definition(
-        name="active_users",
-        description="Users who logged in at least once in the last 7 days",
-        sql_expr="SELECT COUNT(DISTINCT user_id) FROM sessions WHERE login_at >= date('now','-7 days')",
-        tags=["users", "engagement"],
+        name="gross_sales",
+        description="Total gross sales amount across all in-store transactions",
+        sql_expr="SUM(FactSales.SalesAmount)",
+        tags=["finance", "sales"],
         approved=True,
-        reason="initial seed"
+        reason="initial seed — Contoso-compatible"
     )
     upsert_definition(
-        name="revenue",
-        description="Sum of order totals excluding refunds, in USD",
-        sql_expr="SELECT SUM(total_amount) FROM orders WHERE status != 'refunded'",
-        tags=["finance"],
+        name="net_revenue",
+        description="Net revenue after subtracting returns and discounts from gross sales",
+        sql_expr="SUM(FactSales.SalesAmount - FactSales.ReturnAmount - FactSales.DiscountAmount)",
+        tags=["finance", "revenue"],
         approved=True,
-        reason="initial seed"
+        reason="initial seed — Contoso-compatible"
     )
     upsert_definition(
-        name="churn_rate",
-        description="Percentage of users who did not return within 30 days of their last session",
-        sql_expr=None,
-        tags=["users", "retention"],
+        name="total_margin",
+        description="Total profit margin across all in-store sales",
+        sql_expr="SUM(FactSales.Margin)",
+        tags=["finance", "profitability"],
         approved=False,
         reason="initial seed — pending approval"
     )
