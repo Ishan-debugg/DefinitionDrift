@@ -10,21 +10,27 @@ Public API:
     init_query_log()                      — call once at startup
     save_query(qid, question, ...)        — persist a completed query
     get_query_history(session_id, limit)  — read history rows
+    get_query_stats()                     — aggregated stats via SQL (Fix #7)
 """
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Optional
 
 QLOG_DB = Path(__file__).parent.parent / "data" / "query_history.db"
 
+# Fix #1: Persistent connection per thread
+_qlog_local = threading.local()
 
 def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(QLOG_DB, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    """Return a thread-local persistent connection (no open/close per call)."""
+    if not hasattr(_qlog_local, 'conn') or _qlog_local.conn is None:
+        _qlog_local.conn = sqlite3.connect(QLOG_DB, check_same_thread=False)
+        _qlog_local.conn.row_factory = sqlite3.Row
+        _qlog_local.conn.execute("PRAGMA journal_mode=WAL")
+    return _qlog_local.conn
 
 
 def init_query_log():
@@ -48,7 +54,6 @@ def init_query_log():
         CREATE INDEX IF NOT EXISTS idx_qh_created ON query_history(created_at DESC);
     """)
     conn.commit()
-    conn.close()
 
 
 def save_query(
@@ -79,7 +84,6 @@ def save_query(
         ),
     )
     conn.commit()
-    conn.close()
 
 
 def get_query_history(session_id: Optional[str] = None, limit: int = 50) -> list[dict]:
@@ -95,5 +99,24 @@ def get_query_history(session_id: Optional[str] = None, limit: int = 50) -> list
             "SELECT * FROM query_history ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
+
+
+def get_query_stats() -> dict:
+    """Fix #7: Compute stats via SQL aggregation — O(1) memory, instant.
+    
+    Replaces the old pattern of loading 10K rows into Python and iterating.
+    """
+    conn = _get_conn()
+    row = conn.execute("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok_count,
+            AVG(CASE WHEN status='ok' THEN latency_ms END) as avg_latency
+        FROM query_history
+    """).fetchone()
+    return {
+        "total": row[0] or 0,
+        "ok_count": row[1] or 0,
+        "avg_latency": round(row[2] or 0, 0),
+    }

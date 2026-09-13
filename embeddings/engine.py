@@ -24,15 +24,28 @@ import json
 import math
 import hashlib
 import sqlite3
+import threading
 from pathlib import Path
-from functools import lru_cache
+from collections import OrderedDict
 from typing import Optional
 
 # ── Cache DB ──────────────────────────────────────────────────────────────────
 CACHE_DB = Path(__file__).parent / "cache.db"
 
+# Fix #1/#9: Persistent connection + in-memory LRU cache
+_cache_lock = threading.Lock()
+_cache_conn: Optional[sqlite3.Connection] = None
+
+def _get_cache_conn() -> sqlite3.Connection:
+    """Return a persistent cache DB connection (not opened/closed per call)."""
+    global _cache_conn
+    if _cache_conn is None:
+        _cache_conn = sqlite3.connect(CACHE_DB, check_same_thread=False)
+        _cache_conn.execute("PRAGMA journal_mode=WAL")
+    return _cache_conn
+
 def _init_cache():
-    conn = sqlite3.connect(CACHE_DB)
+    conn = _get_cache_conn()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS embedding_cache (
             text_hash TEXT PRIMARY KEY,
@@ -43,28 +56,55 @@ def _init_cache():
         )
     """)
     conn.commit()
-    conn.close()
 
 _init_cache()
 
+# Fix #9: In-memory LRU (O(1) lookups, bounded to 512 entries)
+_LRU_MAX = 512
+_lru_cache: OrderedDict[str, list[float]] = OrderedDict()
+
+def _lru_get(text_hash: str) -> Optional[list[float]]:
+    """Check in-memory LRU first — zero I/O."""
+    if text_hash in _lru_cache:
+        _lru_cache.move_to_end(text_hash)
+        return _lru_cache[text_hash]
+    return None
+
+def _lru_put(text_hash: str, vec: list[float]):
+    """Insert into LRU, evicting oldest if full."""
+    _lru_cache[text_hash] = vec
+    _lru_cache.move_to_end(text_hash)
+    if len(_lru_cache) > _LRU_MAX:
+        _lru_cache.popitem(last=False)
+
 def _cache_get(text: str) -> Optional[list[float]]:
     h = hashlib.md5(text.encode()).hexdigest()
-    conn = sqlite3.connect(CACHE_DB)
-    row = conn.execute(
-        "SELECT vector FROM embedding_cache WHERE text_hash=?", (h,)
-    ).fetchone()
-    conn.close()
-    return json.loads(row[0]) if row else None
+    # Check in-memory LRU first
+    vec = _lru_get(h)
+    if vec is not None:
+        return vec
+    # Fall through to SQLite
+    with _cache_lock:
+        conn = _get_cache_conn()
+        row = conn.execute(
+            "SELECT vector FROM embedding_cache WHERE text_hash=?", (h,)
+        ).fetchone()
+    if row:
+        vec = json.loads(row[0])
+        _lru_put(h, vec)  # promote to LRU
+        return vec
+    return None
 
 def _cache_set(text: str, vector: list[float], model: str):
     h = hashlib.md5(text.encode()).hexdigest()
-    conn = sqlite3.connect(CACHE_DB)
-    conn.execute(
-        "INSERT OR REPLACE INTO embedding_cache (text_hash, text, vector, model) VALUES (?,?,?,?)",
-        (h, text[:500], json.dumps(vector), model)
-    )
-    conn.commit()
-    conn.close()
+    _lru_put(h, vector)
+    with _cache_lock:
+        conn = _get_cache_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO embedding_cache (text_hash, text, vector, model) VALUES (?,?,?,?)",
+            (h, text[:500], json.dumps(vector), model)
+        )
+        conn.commit()
 
 # ── Model loader ──────────────────────────────────────────────────────────────
 _st_model = None

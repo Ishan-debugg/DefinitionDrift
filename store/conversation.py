@@ -18,19 +18,24 @@ Message types: "question" | "sql_result" | "conflict" | "error"
 
 import sqlite3
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 CONV_DB = Path(__file__).parent.parent / "data" / "conversations.db"
 
+# Fix #1: Thread-local persistent connection (no open/close per call)
+_conv_local = threading.local()
 
 def _conn() -> sqlite3.Connection:
-    CONV_DB.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(CONV_DB, check_same_thread=False)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")
-    return c
+    """Return a thread-local persistent connection."""
+    if not hasattr(_conv_local, 'conn') or _conv_local.conn is None:
+        CONV_DB.parent.mkdir(parents=True, exist_ok=True)
+        _conv_local.conn = sqlite3.connect(CONV_DB, check_same_thread=False)
+        _conv_local.conn.row_factory = sqlite3.Row
+        _conv_local.conn.execute("PRAGMA journal_mode=WAL")
+    return _conv_local.conn
 
 
 def init_conversation_db():
@@ -51,7 +56,6 @@ def init_conversation_db():
             ON conversations(session_id, created_at);
     """)
     c.commit()
-    c.close()
 
 
 init_conversation_db()
@@ -79,7 +83,6 @@ def add_message(
         json.dumps(metadata or {})
     ))
     c.commit()
-    c.close()
     return msg_id
 
 
@@ -94,7 +97,6 @@ def get_session_messages(session_id: str, limit: int = 20) -> list[dict]:
         ORDER BY created_at DESC
         LIMIT ?
     """, (session_id, limit)).fetchall()
-    c.close()
     return list(reversed([dict(r) for r in rows]))
 
 
@@ -134,7 +136,6 @@ def clear_session(session_id: str):
     c = _conn()
     c.execute("DELETE FROM conversations WHERE session_id=?", (session_id,))
     c.commit()
-    c.close()
 
 
 def session_summary(session_id: str) -> dict:
@@ -146,7 +147,6 @@ def session_summary(session_id: str) -> dict:
         "SELECT created_at FROM conversations WHERE session_id=? ORDER BY created_at DESC LIMIT 1",
         (session_id,)
     ).fetchone()
-    c.close()
     return {
         "session_id": session_id,
         "total_messages": total,

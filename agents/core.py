@@ -7,7 +7,7 @@ Four agents + two new capabilities:
   - Dynamic schema introspection (zero-definition mode)
 """
 
-import json, sqlite3, re, os
+import json, sqlite3, re, os, time
 from typing import Optional
 from pathlib import Path
 
@@ -21,6 +21,21 @@ from agents.llm_router import call_llm
 from agents.sql_validator import validate_sql
 from db.connection import get_engine, execute_query, inspect_schema, resolve_url
 from config import settings
+
+
+# ── Fix #2: Definitions cache with TTL ────────────────────────────────────────
+_defs_cache: dict = {"key": None, "data": None, "ts": 0}
+_DEFS_CACHE_TTL = 5  # seconds
+
+def _get_definitions_cached(approved_only: bool = True) -> list[dict]:
+    """Return definitions with a 5-second TTL cache to avoid redundant DB reads."""
+    now = time.time()
+    key = f"approved_{approved_only}"
+    if _defs_cache["key"] == key and now - _defs_cache["ts"] < _DEFS_CACHE_TTL:
+        return _defs_cache["data"]
+    data = get_all_definitions(approved_only=approved_only)
+    _defs_cache.update({"key": key, "data": data, "ts": now})
+    return data
 
 
 # ── LLM response parser ──────────────────────────────────────────────────────
@@ -100,18 +115,30 @@ class TokenOptimizer:
             self._def_cache[key] = vec
         return self._def_cache[key]
 
-    def select_relevant(self, question: str, approved_only: bool = True) -> list[dict]:
-        """Return top-K definitions above the similarity threshold, using cached vectors."""
-        all_defs = get_all_definitions(approved_only=approved_only)
+    def select_relevant(self, question: str, approved_only: bool = True,
+                        q_vec: Optional[list[float]] = None) -> list[dict]:
+        """Return top-K definitions above the similarity threshold, using cached vectors.
+        
+        Args:
+            q_vec: Pre-computed question embedding (Fix #3 — avoids double embedding).
+        """
+        all_defs = _get_definitions_cached(approved_only=approved_only)
         if not all_defs:
             return []
-        q_vec, _ = embed(question)
+        if q_vec is None:
+            q_vec, _ = embed(question)
         scored = [(cosine_similarity(q_vec, self._get_def_vec(d)), d) for d in all_defs]
         scored.sort(key=lambda x: x[0], reverse=True)
         return [d for score, d in scored[:self.TOP_K] if score >= self.SIMILARITY_THRESHOLD]
 
-    def build_context_block(self, question: str) -> tuple[str, list[dict]]:
-        relevant = self.select_relevant(question)
+    def build_context_block(self, question: str,
+                            q_vec: Optional[list[float]] = None) -> tuple[str, list[dict]]:
+        """Build context block with relevant definitions.
+        
+        Args:
+            q_vec: Pre-computed question embedding (Fix #3).
+        """
+        relevant = self.select_relevant(question, q_vec=q_vec)
         if not relevant:
             return "", []
         lines = ["## Approved metric definitions (use these EXACTLY)\n"]
@@ -152,19 +179,17 @@ class SchemaIntrospector:
         return self._schema_block
 
     def _build_schema_block(self, engine) -> str:
-        """Build a detailed schema description from introspected metadata."""
+        """Build a detailed schema description from introspected metadata.
+        
+        Fix #8: Skips per-table COUNT(*) queries — column list is sufficient
+        for SQL generation and avoids N extra queries on startup.
+        """
         lines = ["SCHEMA (auto-introspected from live database):"]
         for table_name, columns in sorted(self._tables.items()):
             if table_name in ("sqlite_sequence",):  # skip internal tables
                 continue
-            # Get row count
-            try:
-                result = execute_query(engine, f"SELECT COUNT(*) AS cnt FROM {table_name}", max_rows=1)
-                row_count = result.get("rows", [{}])[0].get("cnt", "?")
-            except Exception:
-                row_count = "?"
             col_names = [c["name"] for c in columns]
-            lines.append(f"  {table_name} ({row_count} rows) — {', '.join(col_names)}")
+            lines.append(f"  {table_name} — {', '.join(col_names)}")
         return "\n".join(lines)
 
     def get_schema_block(self) -> str:
@@ -181,11 +206,17 @@ schema_introspector = SchemaIntrospector()
 class ConflictAgent:
     CONFLICT_THRESHOLD = 0.82
 
-    def check(self, question: str) -> Optional[dict]:
-        all_defs = get_all_definitions(approved_only=True)
+    def check(self, question: str, q_vec: Optional[list[float]] = None) -> Optional[dict]:
+        """Check if question conflicts with existing definitions.
+        
+        Args:
+            q_vec: Pre-computed question embedding (Fix #3 — avoids double embedding).
+        """
+        all_defs = _get_definitions_cached(approved_only=True)
         if not all_defs:
             return None
-        q_vec, _ = embed(question)
+        if q_vec is None:
+            q_vec, _ = embed(question)
         # use optimizer's pre-computed vectors
         best_score, best_def = 0.0, None
         for d in all_defs:
@@ -256,7 +287,7 @@ class DriftWatcher:
         return events
 
     def _find_affected(self, column_name: str) -> Optional[str]:
-        affected = [d["name"] for d in get_all_definitions()
+        affected = [d["name"] for d in _get_definitions_cached()
                     if d.get("sql_expr") and column_name.lower() in d["sql_expr"].lower()]
         return json.dumps(affected) if affected else None
 
@@ -346,8 +377,11 @@ class QueryAgent:
                 lines.append("")
                 history_block = "\n".join(lines)
 
+        # ── Fix #3: Embed question once, reuse vector for conflict + optimizer ──
+        q_vec, _ = embed(question)
+
         # ── Pass 2: inject relevant definitions (token optimizer) ─────────────
-        context_block, used_defs = optimizer.build_context_block(question)
+        context_block, used_defs = optimizer.build_context_block(question, q_vec=q_vec)
 
         # ── Build final prompt ────────────────────────────────────────────────
         parts = []

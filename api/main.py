@@ -30,7 +30,7 @@ from store.db import (
 from store.conversation import (
     get_session_messages, clear_session, session_summary, init_conversation_db
 )
-from store.query_log import init_query_log, save_query, get_query_history as _get_history
+from store.query_log import init_query_log, save_query, get_query_history as _get_history, get_query_stats
 from agents.core import query_agent, conflict_agent, drift_watcher
 from agents.orchestrator import run_query_pipeline
 from agents.llm_router import get_usage_stats
@@ -357,12 +357,11 @@ def stats():
     emb       = cache_stats()
     usage     = get_usage_stats()
 
-    # query history stats — derived from store.query_log
-    _hist = _get_history(limit=10_000)  # cap at 10k for stats aggregation
-    total_q = len(_hist)
-    ok_q    = sum(1 for r in _hist if r.get("status") == "ok")
-    lat_vals = [r["latency_ms"] for r in _hist if r.get("status") == "ok" and r.get("latency_ms")]
-    avg_lat  = (sum(lat_vals) / len(lat_vals)) if lat_vals else 0
+    # Fix #7: query stats via SQL aggregation (not loading 10K rows into memory)
+    qstats  = get_query_stats()
+    total_q = qstats["total"]
+    ok_q    = qstats["ok_count"]
+    avg_lat = qstats["avg_latency"]
 
     return {
         "definitions": {"total": len(all_defs), "approved": len(approved),

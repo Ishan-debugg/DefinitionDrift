@@ -26,7 +26,7 @@ HITL interrupt:
   - LangGraph checkpoint stores full state across the pause
 """
 
-import os, json
+import os, json, time
 from typing import TypedDict, Optional, Annotated
 from pathlib import Path
 
@@ -129,14 +129,26 @@ def run_query_node(state: QueryState) -> QueryState:
     return {**state, "sql_result": result, "step_log": log}
 
 
+# Drift check throttle — only run schema diff every 5 minutes, not on every query
+_DRIFT_COOLDOWN_SEC = 300  # 5 minutes
+_last_drift_check = 0.0
+
+
 def check_drift_node(state: QueryState) -> QueryState:
-    """After query: snapshot schema and detect drift."""
+    """After query: snapshot schema and detect drift (throttled to avoid blocking every query)."""
+    global _last_drift_check
     log = state.get("step_log", [])
     db_path = state.get("data_db_path")
+
+    now = time.time()
+    if now - _last_drift_check < _DRIFT_COOLDOWN_SEC:
+        log.append(f"check_drift: skipped (cooldown, {int(_DRIFT_COOLDOWN_SEC - (now - _last_drift_check))}s remaining)")
+        return {**state, "drift_events": [], "step_log": log}
 
     if db_path and Path(db_path).exists():
         log.append("check_drift: running schema snapshot diff")
         events = drift_watcher.snapshot_and_diff(db_path)
+        _last_drift_check = time.time()
         if events:
             log.append(f"check_drift: {len(events)} drift event(s) detected")
         else:

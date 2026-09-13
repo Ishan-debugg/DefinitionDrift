@@ -101,6 +101,76 @@ def _init_usage_db():
 
 _init_usage_db()
 
+# ── In-memory caches (Fix #5, #6, #10) ────────────────────────────────────────
+
+# Fix #5: Cache OpenAI client instances per provider (avoid TCP/SSL setup per call)
+_clients: dict[str, OpenAI] = {}
+
+def _get_client(provider_name: str) -> Optional[OpenAI]:
+    """Return a cached OpenAI-compatible client, creating on first use."""
+    if provider_name in _clients:
+        return _clients[provider_name]
+    cfg = PROVIDERS[provider_name]
+    api_key = os.getenv(cfg["api_key_env"], "")
+    if not api_key:
+        return None
+    client = OpenAI(api_key=api_key, base_url=cfg["base_url"])
+    _clients[provider_name] = client
+    return client
+
+# Fix #6: Circuit breaker — skip providers that fail 3+ times in a row
+_circuit_breaker: dict[str, dict] = {}  # provider → {"failures": N, "skip_until": timestamp}
+_CIRCUIT_BREAKER_THRESHOLD = 3
+_CIRCUIT_BREAKER_COOLDOWN = 600  # 10 minutes
+
+def _record_failure(provider: str):
+    """Record a provider failure. After threshold, open the circuit."""
+    cb = _circuit_breaker.setdefault(provider, {"failures": 0, "skip_until": 0})
+    cb["failures"] += 1
+    if cb["failures"] >= _CIRCUIT_BREAKER_THRESHOLD:
+        cb["skip_until"] = time.time() + _CIRCUIT_BREAKER_COOLDOWN
+        print(f"[LLM Router] Circuit OPEN for {provider} — skipping for {_CIRCUIT_BREAKER_COOLDOWN}s")
+
+def _record_success(provider: str):
+    """Reset circuit breaker on success."""
+    if provider in _circuit_breaker:
+        _circuit_breaker[provider] = {"failures": 0, "skip_until": 0}
+
+def _is_circuit_open(provider: str) -> bool:
+    """Check if a provider should be skipped (circuit is open)."""
+    cb = _circuit_breaker.get(provider)
+    if not cb:
+        return False
+    if cb["failures"] >= _CIRCUIT_BREAKER_THRESHOLD:
+        if time.time() < cb["skip_until"]:
+            return True  # still in cooldown — skip
+        else:
+            cb["failures"] = 0  # cooldown expired — reset and retry
+    return False
+
+# Fix #10: In-memory daily count cache (avoid SQLite per provider attempt)
+_daily_count_cache: dict[str, dict] = {}  # provider → {"date": str, "count": int}
+
+def _today_calls_cached(provider: str) -> int:
+    """Fast in-memory check of daily call count."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    cached = _daily_count_cache.get(provider)
+    if cached and cached["date"] == today:
+        return cached["count"]
+    # Cold start or date change — read from DB
+    count = _today_calls_db(provider)
+    _daily_count_cache[provider] = {"date": today, "count": count}
+    return count
+
+def _increment_daily_count(provider: str):
+    """Increment the in-memory counter after a call."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    cached = _daily_count_cache.get(provider)
+    if cached and cached["date"] == today:
+        cached["count"] += 1
+    else:
+        _daily_count_cache[provider] = {"date": today, "count": 1}
+
 def _log_call(provider: str, model: str, task: str,
               input_tok: int, output_tok: int, latency_ms: int,
               success: bool, error: str = None):
@@ -116,8 +186,10 @@ def _log_call(provider: str, model: str, task: str,
     """, (today, provider))
     conn.commit()
     conn.close()
+    _increment_daily_count(provider)
 
-def _today_calls(provider: str) -> int:
+def _today_calls_db(provider: str) -> int:
+    """Read daily count from SQLite (cold start only)."""
     conn = sqlite3.connect(USAGE_DB)
     today = datetime.utcnow().strftime("%Y-%m-%d")
     row = conn.execute(
@@ -157,13 +229,20 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
     if not api_key:
         return None
 
-    # check daily limit
-    if _today_calls(provider_name) >= cfg["rpd"]:
+    # Fix #6: Circuit breaker — skip providers that keep failing
+    if _is_circuit_open(provider_name):
+        return None
+
+    # Fix #10: Check daily limit via in-memory cache
+    if _today_calls_cached(provider_name) >= cfg["rpd"]:
         print(f"[LLM Router] {provider_name} daily limit reached ({cfg['rpd']} calls)")
         return None
 
     model = model_override or cfg["model"]
-    client = OpenAI(api_key=api_key, base_url=cfg["base_url"])
+    # Fix #5: Reuse cached client
+    client = _get_client(provider_name)
+    if client is None:
+        return None
     start = time.time()
     try:
         resp = client.chat.completions.create(
@@ -182,11 +261,13 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
                   usage.prompt_tokens if usage else 0,
                   usage.completion_tokens if usage else 0,
                   latency, True)
+        _record_success(provider_name)
         print(f"[LLM Router] {provider_name}/{model} OK ({latency}ms)")
         return text
     except Exception as e:
         latency = int((time.time() - start) * 1000)
         _log_call(provider_name, model, task, 0, 0, latency, False, str(e))
+        _record_failure(provider_name)
         print(f"[LLM Router] {provider_name}/{model} failed: {e}")
         return None
 
