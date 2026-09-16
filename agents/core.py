@@ -100,6 +100,35 @@ def _parse_llm_response(raw: str) -> dict:
 
 
 # ── 1. TOKEN OPTIMIZER ───────────────────────────────────────────────────────
+
+# Keyword synonyms: map natural-language terms → definition names they relate to.
+# When a question contains these terms, the corresponding definition gets a score
+# boost so that semantic near-misses still rank correctly.
+_KEYWORD_ALIASES: dict[str, list[str]] = {
+    "return":     ["return_rate", "net_revenue"],
+    "returned":   ["return_rate"],
+    "sent back":  ["return_rate"],
+    "refund":     ["net_revenue", "return_rate"],
+    "refunds":    ["net_revenue", "return_rate"],
+    "margin":     ["gross_margin", "gross_margin_pct"],
+    "profit":     ["gross_margin", "gross_margin_pct"],
+    "gross":      ["gross_sales", "gross_margin", "gross_margin_pct"],
+    "deduction":  ["net_revenue", "gross_sales"],
+    "deductions": ["net_revenue", "gross_sales"],
+    "net":        ["net_revenue"],
+    "revenue":    ["net_revenue", "gross_sales"],
+    "sales":      ["gross_sales", "net_revenue"],
+    "rate":       ["return_rate"],
+    "online":     ["online_units_sold"],
+    "units":      ["units_sold", "online_units_sold", "return_rate"],
+    "aov":        ["avg_order_value"],
+    "average":    ["avg_order_value"],
+    "transaction":["avg_order_value"],
+}
+
+KEYWORD_BOOST = 0.15  # score bonus when question keywords match a definition
+
+
 class TokenOptimizer:
     SIMILARITY_THRESHOLD = settings.OPTIMIZER_SIMILARITY_THRESHOLD  # 0.45 from config
     TOP_K = settings.OPTIMIZER_TOP_K                                # 4 from config
@@ -108,16 +137,43 @@ class TokenOptimizer:
         self._def_cache: dict[str, list[float]] = {}  # def_id → vector
 
     def _get_def_vec(self, d: dict) -> list[float]:
-        """Return cached embedding vector for a definition, computing on first access."""
+        """Return cached embedding vector for a definition, computing on first access.
+        
+        Uses an enriched text that includes the definition name, description, and tags
+        to give the embedding model more semantic surface area.
+        """
         key = f"{d['id']}v{d['version']}"
         if key not in self._def_cache:
-            vec, _ = embed(f"{d['name']} {d['description']}")
+            # Enrich: include tags for broader semantic coverage
+            tags_str = ""
+            if d.get("tags"):
+                try:
+                    import json as _json
+                    tags = _json.loads(d["tags"]) if isinstance(d["tags"], str) else d["tags"]
+                    tags_str = " ".join(tags)
+                except Exception:
+                    pass
+            embed_text = f"{d['name']} {d['description']} {tags_str}".strip()
+            vec, _ = embed(embed_text)
             self._def_cache[key] = vec
         return self._def_cache[key]
+
+    def _keyword_boost(self, question: str, def_name: str) -> float:
+        """Return a score bonus if the question contains keywords associated with this definition."""
+        q_lower = question.lower()
+        for keyword, def_names in _KEYWORD_ALIASES.items():
+            if keyword in q_lower and def_name in def_names:
+                return KEYWORD_BOOST
+        return 0.0
 
     def select_relevant(self, question: str, approved_only: bool = True,
                         q_vec: Optional[list[float]] = None) -> list[dict]:
         """Return top-K definitions above the similarity threshold, using cached vectors.
+        
+        Scoring = cosine_similarity + keyword_boost (capped at 1.0).
+        The keyword boost ensures that questions containing obvious domain terms
+        (e.g. 'return rate') always surface the correct definition even when the
+        embedding similarity is borderline.
         
         Args:
             q_vec: Pre-computed question embedding (Fix #3 — avoids double embedding).
@@ -127,7 +183,12 @@ class TokenOptimizer:
             return []
         if q_vec is None:
             q_vec, _ = embed(question)
-        scored = [(cosine_similarity(q_vec, self._get_def_vec(d)), d) for d in all_defs]
+        scored = []
+        for d in all_defs:
+            base_score = cosine_similarity(q_vec, self._get_def_vec(d))
+            boost = self._keyword_boost(question, d["name"])
+            final_score = min(1.0, base_score + boost)
+            scored.append((final_score, d))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [d for score, d in scored[:self.TOP_K] if score >= self.SIMILARITY_THRESHOLD]
 

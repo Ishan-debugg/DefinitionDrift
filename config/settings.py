@@ -33,7 +33,7 @@ EMBEDDING_CACHE_DB    = ROOT / "embeddings" / "cache.db"
 
 # ── CONFLICT DETECTION ────────────────────────────────────────────────────────
 CONFLICT_SIMILARITY_THRESHOLD = 0.82   # above this → HITL queue
-OPTIMIZER_SIMILARITY_THRESHOLD = 0.45  # above this → inject into context
+OPTIMIZER_SIMILARITY_THRESHOLD = 0.35  # above this → inject into context (lowered from 0.45 for better recall)
 OPTIMIZER_TOP_K = 4                    # max definitions to inject per query
 
 # ── DATABASES ──────────────────────────────────────────────────────────────────
