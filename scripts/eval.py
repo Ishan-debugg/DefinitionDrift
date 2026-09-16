@@ -293,7 +293,7 @@ def run_conflict(results: dict) -> dict:
         q_vec, _ = embed(question)
         best_s, best_d = 0.0, None
         for d in defs:
-            d_vec, _ = embed(f"{d['name']} {d['description']}")
+            d_vec = optimizer._get_def_vec(d)
             s = cosine_similarity(q_vec, d_vec)
             if s > best_s: best_s, best_d = s, d
 

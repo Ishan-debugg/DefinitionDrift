@@ -265,7 +265,7 @@ schema_introspector = SchemaIntrospector()
 
 # ── 2. CONFLICT AGENT ────────────────────────────────────────────────────────
 class ConflictAgent:
-    CONFLICT_THRESHOLD = 0.82
+    CONFLICT_THRESHOLD = getattr(settings, "CONFLICT_SIMILARITY_THRESHOLD", 0.45)
 
     def check(self, question: str, q_vec: Optional[list[float]] = None) -> Optional[dict]:
         """Check if question conflicts with existing definitions.
