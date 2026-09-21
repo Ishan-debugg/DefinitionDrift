@@ -265,8 +265,8 @@ schema_introspector = SchemaIntrospector()
 
 # ── 2. CONFLICT AGENT ────────────────────────────────────────────────────────
 class ConflictAgent:
-    CONFLICT_THRESHOLD = getattr(settings, "CONFLICT_SIMILARITY_THRESHOLD", 0.45)
-
+    CONFLICT_THRESHOLD = 0.70   # was 0.82
+    
     def check(self, question: str, q_vec: Optional[list[float]] = None) -> Optional[dict]:
         """Check if question conflicts with existing definitions.
         
@@ -403,7 +403,16 @@ RULES (strict):
   "explanation": "one sentence describing what this measures",
   "warning": "<caveat or null>"
 }}
-9. temperature=0 — be deterministic. Same question must produce identical SQL."""
+9. temperature=0 — be deterministic. Same question must produce identical SQL.
+
+## Examples
+
+Q: What is net revenue for 2008?
+A: {{"sql": "SELECT SUM(SalesAmount - ReturnAmount) FROM FactSales fs JOIN DimDate dd ON fs.DateKey = dd.DateKey WHERE dd.CalendarYear = 2008", "confidence": "high", "used_definitions": ["net_revenue"], "explanation": "Net revenue filters to 2008 via CalendarYear.", "warning": null}}
+
+Q: What is the return rate across all channels?
+A: {{"sql": "SELECT ROUND(SUM(ReturnQuantity)*100.0/NULLIF(SUM(SalesQuantity),0),2) FROM (SELECT ReturnQuantity, SalesQuantity FROM FactSales UNION ALL SELECT ReturnQuantity, SalesQuantity FROM FactOnlineSales)", "confidence": "high", "used_definitions": ["return_rate"], "explanation": "Combines store and online channels.", "warning": null}}
+"""
 
 
 class QueryAgent:
@@ -461,9 +470,10 @@ class QueryAgent:
         user_msg = "\n\n".join(parts)
 
         # ── Pass 3: generate SQL via free LLM ─────────────────────────────────
+        task = "multiturn" if history_block else "sql_generation"
         raw, provider = call_llm(
             system=system_prompt, user=user_msg,
-            task="sql_generation", max_tokens=512,
+            task=task, max_tokens=512,
         )
 
         result = _parse_llm_response(raw)

@@ -33,21 +33,36 @@ from openai import OpenAI
 
 # Gemini needs its own SDK
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
+    
+import functools
+
+_provider_health: dict[str, float] = {}  # provider → last_failure_timestamp
+
+def _is_healthy(provider: str, cooldown_secs: int = 60) -> bool:
+    last_fail = _provider_health.get(provider, 0)
+    return (time.time() - last_fail) > cooldown_secs
+
+def _mark_failed(provider: str):
+    _provider_health[provider] = time.time()
 
 # ── Provider configs ──────────────────────────────────────────────────────────
 
 PROVIDERS = {
-    "groq": {
-        "base_url":  "https://api.groq.com/openai/v1",
+    "groq_fast": {
+        "base_url":    "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "model":     "llama-3.3-70b-versatile",
-        "rpm":       30,
-        "rpd":       1000,
-        "best_for":  ["sql_generation", "structured_output"],
+        "model":       "llama-3.1-8b-instant",
+        "rpd":         1000,
+    },
+    "groq_smart": {
+        "base_url":    "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "model":       "llama-3.3-70b-versatile",
+        "rpd":         1000,
     },
     "cerebras": {
         "base_url":  "https://api.cerebras.ai/v1",
@@ -229,6 +244,9 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
     if not api_key:
         return None
 
+    if not _is_healthy(provider_name):
+        return None
+
     # Fix #6: Circuit breaker — skip providers that keep failing
     if _is_circuit_open(provider_name):
         return None
@@ -265,6 +283,7 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
         print(f"[LLM Router] {provider_name}/{model} OK ({latency}ms)")
         return text
     except Exception as e:
+        _mark_failed(provider_name)
         latency = int((time.time() - start) * 1000)
         _log_call(provider_name, model, task, 0, 0, latency, False, str(e))
         _record_failure(provider_name)
@@ -287,18 +306,14 @@ def _call_gemini(system: str, user: str, max_tokens: int = 512,
 
     start = time.time()
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            "gemini-1.5-flash",
-            system_instruction=system,
-            generation_config={"max_output_tokens": max_tokens, "temperature": 0.0}
-        )
-        resp = model.generate_content(user)
+        client = genai.Client(api_key=api_key)
+        prompt = f"{system}\n\n{user}"
+        resp = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         latency = int((time.time() - start) * 1000)
-        text = resp.text.strip()
-        tok_in  = resp.usage_metadata.prompt_token_count if resp.usage_metadata else 0
-        tok_out = resp.usage_metadata.candidates_token_count if resp.usage_metadata else 0
-        _log_call("gemini", "gemini-1.5-flash", task, tok_in, tok_out, latency, True)
+        text = resp.text.strip() if hasattr(resp, "text") and resp.text else ""
+        tok_in = 0
+        tok_out = 0
+        _log_call("gemini", "gemini-2.0-flash", task, tok_in, tok_out, latency, True)
         print(f"[LLM Router] gemini OK ({latency}ms)")
         return text
     except Exception as e:
@@ -328,16 +343,24 @@ def call_llm(system: str, user: str,
     model_override: if set, forces a specific model string on each provider attempt.
     Falls through providers automatically if one fails or hits limits.
     """
-    providers_by_task = {
-        "sql_generation":       ["groq", "cerebras", "openrouter"],
-        "sql_generation_smart": ["groq", "cerebras", "openrouter"],  # same fallback chain, smarter model
-        "hitl_explain":         ["gemini", "groq", "openrouter"],
-        "batch_eval":           ["cerebras", "groq", "openrouter"],
-        "conflict_check":       ["groq", "openrouter"],
-        "general":              ["groq", "gemini", "cerebras", "openrouter"],
+    TASK_ORDER = {
+        # Short prompt, JSON output → smallest fast model
+        "sql_generation":  ["groq_fast", "cerebras", "gemini", "openrouter"],
+    
+        # Long conversation history → highest context model
+        "multiturn":       ["gemini", "groq_smart", "openrouter"],
+    
+        # Reasoning tasks → larger model
+        "hitl_explain":    ["groq_smart", "gemini", "openrouter"],
+    
+        # Bulk, stateless, short → highest throughput
+        "batch_eval":      ["cerebras", "groq_fast"],
+    
+        # Similarity/conflict (very short) → smallest model
+        "conflict_check":  ["groq_fast", "openrouter"],
     }
 
-    ordered = providers_by_task.get(task, ["groq", "gemini", "cerebras", "openrouter"])
+    ordered = TASK_ORDER.get(task, ["groq_fast", "gemini", "cerebras", "openrouter"])
 
     for provider in ordered:
         if provider == "gemini":
