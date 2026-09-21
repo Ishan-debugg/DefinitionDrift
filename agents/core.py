@@ -488,14 +488,13 @@ class QueryAgent:
         # reports categorical "low"|"medium"|"high" — we escalate on "low".
         if result.get("confidence") == "low":
             print(
-                f"[QueryAgent] confidence=low — escalating to {settings.QUERY_MODEL_SMART}"
+                f"[QueryAgent] confidence=low — escalating via task routing"
             )
             raw2, provider2 = call_llm(
                 system=system_prompt,
                 user=user_msg,
-                task="sql_generation_smart",
+                task="hitl_explain",
                 max_tokens=settings.MAX_TOKENS_QUERY,
-                model_override=settings.QUERY_MODEL_SMART,
             )
             result2 = _parse_llm_response(raw2)
             result2["provider_used"] = provider2

@@ -55,7 +55,7 @@ PROVIDERS = {
     "groq_fast": {
         "base_url":    "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "model":       "llama-3.1-8b-instant",
+        "model":       "llama3-8b-8192",
         "rpd":         1000,
     },
     "groq_smart": {
@@ -67,7 +67,7 @@ PROVIDERS = {
     "cerebras": {
         "base_url":  "https://api.cerebras.ai/v1",
         "api_key_env": "CEREBRAS_API_KEY",
-        "model":     "llama-3.3-70b",
+        "model":     "llama3.3-70b",
         "rpm":       30,
         "rpd":       99999,   # 1M tokens/day, not request-capped
         "best_for":  ["batch_eval", "bulk_queries"],
@@ -300,7 +300,7 @@ def _call_gemini(system: str, user: str, max_tokens: int = 512,
     api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         return None
-    if _today_calls("gemini") >= 1500:
+    if _today_calls_cached("gemini") >= 1500:
         print("[LLM Router] Gemini daily limit reached (1500)")
         return None
 
@@ -308,12 +308,12 @@ def _call_gemini(system: str, user: str, max_tokens: int = 512,
     try:
         client = genai.Client(api_key=api_key)
         prompt = f"{system}\n\n{user}"
-        resp = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        resp = client.models.generate_content(model="gemini-3.6-flash", contents=prompt)
         latency = int((time.time() - start) * 1000)
         text = resp.text.strip() if hasattr(resp, "text") and resp.text else ""
         tok_in = 0
         tok_out = 0
-        _log_call("gemini", "gemini-2.0-flash", task, tok_in, tok_out, latency, True)
+        _log_call("gemini", "gemini-3.6-flash", task, tok_in, tok_out, latency, True)
         print(f"[LLM Router] gemini OK ({latency}ms)")
         return text
     except Exception as e:

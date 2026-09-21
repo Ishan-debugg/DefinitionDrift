@@ -1,0 +1,79 @@
+{
+  "run_at": "2026-09-21T08:33:28.031126",
+  "suite": "all",
+  "retrieval": {
+    "mrr": 0.95,
+    "hit_rate@1": 0.9,
+    "avg_latency_ms": 1.78,
+    "precision@1": 0.9,
+    "recall@1": 0.75,
+    "f1@1": 0.8,
+    "ndcg@1": 0.9,
+    "precision@2": 0.65,
+    "recall@2": 1.0,
+    "f1@2": 0.7667,
+    "ndcg@2": 0.9631,
+    "precision@3": 0.4333,
+    "recall@3": 1.0,
+    "f1@3": 0.59,
+    "ndcg@3": 0.9631
+  },
+  "conflict": {
+    "precision": 1.0,
+    "recall": 0.3333,
+    "f1": 0.5,
+    "accuracy": 0.7143,
+    "false_positive_rate": 0.0,
+    "specificity": 1.0,
+    "tp": 1,
+    "fp": 0,
+    "tn": 4,
+    "fn": 2,
+    "avg_latency_ms": 6.43,
+    "current_threshold": 0.7
+  },
+  "sql": {
+    "keyword_hit_rate": 0.0,
+    "table_hit_rate": 0.0,
+    "validation_pass_rate": 0.0,
+    "consistency_rate": 1.0,
+    "confidence_distribution": {
+      "high": 0,
+      "medium": 0,
+      "low": 5
+    },
+    "avg_latency_ms": 604.02,
+    "p50_latency_ms": 1.06,
+    "p90_latency_ms": 3015.64,
+    "samples": 5
+  },
+  "performance": {
+    "e2e_latency": {
+      "p50": 3.0,
+      "p90": 3.62,
+      "p95": 3.62,
+      "avg": 2.7
+    },
+    "optimizer_latency": {
+      "p50": 1.51,
+      "p90": 2.0,
+      "avg": 1.3
+    },
+    "token_efficiency": {
+      "avg_injected_tokens": 207,
+      "full_schema_tokens": 800,
+      "savings_pct": 74.2
+    },
+    "embedding_cache": {
+      "total_cached": 46,
+      "by_model": {
+        "all-MiniLM-L6-v2": 46
+      }
+    }
+  },
+  "multiturn": {
+    "context_retention_rate": 0.0,
+    "followup_resolution_rate": 1.0,
+    "samples": 2
+  }
+}
