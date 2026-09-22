@@ -84,6 +84,24 @@ def init_db():
             logged_at   TEXT NOT NULL,
             notified    INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS query_log (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT,
+            question    TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            intent      TEXT,
+            provider    TEXT,
+            latency_ms  INTEGER,
+            sql_result  TEXT,
+            used_definitions TEXT,
+            feedback    INTEGER,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ql_session  ON query_log(session_id);
+        CREATE INDEX IF NOT EXISTS idx_ql_status   ON query_log(status);
+        CREATE INDEX IF NOT EXISTS idx_ql_created  ON query_log(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_ql_intent   ON query_log(intent);
     """)
     conn.commit()
     conn.close()

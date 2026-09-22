@@ -25,8 +25,9 @@ import json
 import time
 import sqlite3
 from pathlib import Path
-from typing import Optional
 from datetime import datetime
+from typing import Optional, Literal
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # OpenAI-compatible client works for Groq, Cerebras, OpenRouter
 from openai import OpenAI
@@ -262,8 +263,15 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
     if client is None:
         return None
     start = time.time()
-    try:
-        resp = client.chat.completions.create(
+    
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=3),
+        retry=retry_if_exception_type((Exception,)),
+        reraise=True
+    )
+    def _do_call():
+        return client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system},
@@ -272,6 +280,9 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
             max_tokens=max_tokens,
             temperature=0.0,   # deterministic — same question, same SQL
         )
+    
+    try:
+        resp = _do_call()
         latency = int((time.time() - start) * 1000)
         text = resp.choices[0].message.content.strip()
         usage = resp.usage

@@ -10,11 +10,14 @@ from typing import Optional, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, Header, Request
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, Header, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+import secrets
 
 # Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -25,12 +28,12 @@ from store.db import (
     init_db, get_all_definitions, get_definition_by_name,
     get_definition_history, upsert_definition,
     get_pending_conflicts, resolve_conflict as db_resolve,
-    get_unnotified_drift, mark_drift_notified, enqueue_conflict
+    get_unnotified_drift, mark_drift_notified, enqueue_conflict,
+    log_query as save_query, update_feedback, get_query_history as _get_history, get_query_stats
 )
 from store.conversation import (
     get_session_messages, clear_session, session_summary, init_conversation_db
 )
-from store.query_log import init_query_log, save_query, get_query_history as _get_history, get_query_stats
 from agents.core import query_agent, conflict_agent, drift_watcher
 from agents.orchestrator import run_query_pipeline
 from agents.llm_router import get_usage_stats
@@ -42,29 +45,23 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
 init_conversation_db()
-init_query_log()
 # Resolve the data-DB connection string — accepts SQLAlchemy URL or bare path.
 # Priority: DATA_DB_URL env var > DATA_DB_PATH env var > default SQLite file.
 DATA_DB = resolve_url(os.getenv("DATA_DB_URL") or os.getenv("DATA_DB_PATH", ""))
 
 # ── Admin token — secure startup validation ───────────────────────────────────
-_INSECURE_DEFAULT = "dd-dev-token-change-in-prod"
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
-_env = os.getenv("ENV", "dev").lower()
-
-if not ADMIN_TOKEN or ADMIN_TOKEN == _INSECURE_DEFAULT:
-    if _env == "production":
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
+if not ADMIN_TOKEN:
+    if os.getenv("ENV", "dev").lower() == "production":
         raise RuntimeError(
-            "[Security] ADMIN_TOKEN is missing or set to the insecure default. "
-            "Set a strong secret in your .env before starting in production."
+            "ADMIN_TOKEN environment variable is required in production. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
         )
     else:
-        # Dev/staging: allow startup but warn loudly
-        ADMIN_TOKEN = _INSECURE_DEFAULT
-        print(
-            "\n[WARNING] ADMIN_TOKEN is not set or is the insecure default. "
-            "This is fine for local dev, but MUST be changed before deploying to production.\n"
-        )
+        # Dev only — generate a session token and print it once
+        ADMIN_TOKEN = secrets.token_hex(32)
+        print(f"[DEV] No ADMIN_TOKEN set. Using temporary token: {ADMIN_TOKEN}")
+        print("[DEV] Set ADMIN_TOKEN in .env to suppress this warning.")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
@@ -162,14 +159,27 @@ class ConflictResolve(BaseModel):
     merged_definition: Optional[str] = None
 
 class QueryRequest(BaseModel):
-    question: str
-    run_query: Optional[bool] = True
-    session_id: Optional[str] = None
+    question:   str = Field(..., min_length=3, max_length=2000)
+    run_query:  bool = False
+    session_id: Optional[str] = Field(None, max_length=64)
+
+    @field_validator("question")
+    @classmethod
+    def no_injection(cls, v):
+        # Block obvious prompt injection attempts
+        blocked = ["ignore previous", "ignore all instructions",
+                   "system prompt", "jailbreak", "disregard"]
+        v_lower = v.lower()
+        if any(phrase in v_lower for phrase in blocked):
+            raise ValueError("Invalid query content")
+        return v.strip()
 
 class FeedbackRequest(BaseModel):
     query_id: str
     rating: int  # 1=good, -1=bad
     comment: Optional[str] = None
+
+_executor = ThreadPoolExecutor(max_workers=4)
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
@@ -236,10 +246,14 @@ async def run_query(request: Request, body: QueryRequest):
     qid = hashlib.md5(f"{body.question}{time.time()}".encode()).hexdigest()[:12]
     t0 = time.time()
 
-    result = run_query_pipeline(
-        question=body.question,
-        data_db_path=DATA_DB if body.run_query else None,
-        thread_id=session_id,
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        _executor,
+        lambda: run_query_pipeline(
+            question=body.question,
+            data_db_path=DATA_DB if body.run_query else None,
+            thread_id=session_id,
+        )
     )
 
     latency = int((time.time() - t0) * 1000)
@@ -247,8 +261,12 @@ async def run_query(request: Request, body: QueryRequest):
     provider = sql_r.get("provider_used", "none") if sql_r else "conflict"
     defs = sql_r.get("used_definitions", []) if sql_r else []
 
-    save_query(qid, body.question, result["status"],
-               sql_r, provider, defs, latency, session_id)
+    save_query(
+        id=qid, session_id=session_id, question=body.question,
+        status=result["status"], intent=result.get("intent"),
+        provider=provider, latency_ms=latency,
+        sql_result=sql_r, used_definitions=defs
+    )
 
     # broadcast to all open WebSocket clients
     await manager.broadcast({
@@ -267,6 +285,7 @@ async def run_query(request: Request, body: QueryRequest):
 
 @app.post("/api/feedback")
 def submit_feedback(body: FeedbackRequest):
+    update_feedback(body.query_id, body.rating)
     if body.rating == -1:
         # Find query to link to
         history = _get_history(limit=500)
@@ -285,6 +304,32 @@ def submit_feedback(body: FeedbackRequest):
             )
             
     return {"status": "ok", "message": "Feedback recorded"}
+
+@app.get("/api/definitions/usage")
+def definition_usage():
+    """Shows which definitions are actually being used in production."""
+    import sqlite3
+    conn = sqlite3.connect(DATA_DB)
+    # Actually wait, the query_log is in definitiondrift.db, not DATA_DB
+    # We must connect to the same DB that query_log is in!
+    from store.db import DB_PATH
+    conn2 = sqlite3.connect(DB_PATH)
+    rows = conn2.execute("""
+        SELECT
+            json_each.value AS def_name,
+            COUNT(*) AS query_count,
+            AVG(latency_ms) AS avg_latency,
+            SUM(CASE WHEN feedback=1 THEN 1 ELSE 0 END) AS thumbs_up,
+            SUM(CASE WHEN feedback=-1 THEN 1 ELSE 0 END) AS thumbs_down
+        FROM query_log, json_each(query_log.used_definitions)
+        WHERE used_definitions IS NOT NULL
+        GROUP BY def_name
+        ORDER BY query_count DESC
+    """).fetchall()
+    conn2.close()
+    return {"usage": [dict(zip(
+        ["name","query_count","avg_latency","thumbs_up","thumbs_down"], r
+    )) for r in rows]}
 
 # ── Query history ─────────────────────────────────────────────────────────────
 @app.get("/api/history")
