@@ -265,7 +265,9 @@ schema_introspector = SchemaIntrospector()
 
 # ── 2. CONFLICT AGENT ────────────────────────────────────────────────────────
 class ConflictAgent:
-    CONFLICT_THRESHOLD = 0.70   # was 0.82
+    # Base threshold — intentionally conservative so DATA queries don't trigger.
+    # IntentRouter overrides to 0.45 (DEFINE) / 0.65 (AMBIGUOUS) at runtime.
+    CONFLICT_THRESHOLD = 0.50
     
     def check(self, question: str, q_vec: Optional[list[float]] = None) -> Optional[dict]:
         """Check if question conflicts with existing definitions.

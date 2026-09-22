@@ -53,30 +53,35 @@ def _mark_failed(provider: str):
 # ── Provider configs ──────────────────────────────────────────────────────────
 
 PROVIDERS = {
+    # Groq fast — Qwen3 27B: fastest text-gen model available on this key
     "groq_fast": {
         "base_url":    "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "model":       "llama3-8b-8192",
+        "model":       "qwen/qwen3.8-27b",
         "rpd":         1000,
     },
+    # Groq smart — GPT-OSS 120B: largest model available on this key
     "groq_smart": {
         "base_url":    "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "model":       "llama-3.3-70b-versatile",
+        "model":       "openai/gpt-oss-120b",
         "rpd":         1000,
     },
+    # Cerebras — 70B with massive token budget for batch workloads
+    # Correct model slug is llama3.1-70b on Cerebras cloud free tier
     "cerebras": {
         "base_url":  "https://api.cerebras.ai/v1",
         "api_key_env": "CEREBRAS_API_KEY",
-        "model":     "llama3.3-70b",
+        "model":     "llama3.1-70b",
         "rpm":       30,
-        "rpd":       99999,   # 1M tokens/day, not request-capped
+        "rpd":       99999,
         "best_for":  ["batch_eval", "bulk_queries"],
     },
+    # OpenRouter — last-resort fallback only (credit-limited)
     "openrouter": {
         "base_url":  "https://openrouter.ai/api/v1",
         "api_key_env": "OPENROUTER_API_KEY",
-        "model":     "meta-llama/llama-3.3-70b-instruct",
+        "model":     "meta-llama/llama-3.3-70b-instruct:free",
         "rpm":       20,
         "rpd":       50,
         "best_for":  ["fallback"],
@@ -296,7 +301,17 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
     except Exception as e:
         _mark_failed(provider_name)
         latency = int((time.time() - start) * 1000)
-        _log_call(provider_name, model, task, 0, 0, latency, False, str(e))
+        err_str = str(e)
+        # Permanent errors (bad API key, model gone, no credits) — open circuit now
+        # so we don't waste retry budget on them
+        if any(code in err_str for code in ["402", "401", "model_not_found",
+                                             "model_decommissioned", "invalid_api_key"]):
+            _circuit_breaker[provider_name] = {
+                "failures": _CIRCUIT_BREAKER_THRESHOLD,
+                "skip_until": time.time() + _CIRCUIT_BREAKER_COOLDOWN
+            }
+            print(f"[LLM Router] {provider_name} permanent error — circuit opened: {e}")
+        _log_call(provider_name, model, task, 0, 0, latency, False, err_str)
         _record_failure(provider_name)
         print(f"[LLM Router] {provider_name}/{model} failed: {e}")
         return None
@@ -322,14 +337,16 @@ def _call_gemini(system: str, user: str, max_tokens: int = 512,
         resp = client.models.generate_content(model="gemini-3.6-flash", contents=prompt)
         latency = int((time.time() - start) * 1000)
         text = resp.text.strip() if hasattr(resp, "text") and resp.text else ""
-        tok_in = 0
-        tok_out = 0
-        _log_call("gemini", "gemini-3.6-flash", task, tok_in, tok_out, latency, True)
+        _log_call("gemini", "gemini-3.6-flash", task, 0, 0, latency, True)
         print(f"[LLM Router] gemini OK ({latency}ms)")
         return text
     except Exception as e:
         latency = int((time.time() - start) * 1000)
-        _log_call("gemini", "gemini-1.5-flash", task, 0, 0, latency, False, str(e))
+        err_str = str(e)
+        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            print("[LLM Router] gemini 429 quota exhausted — cooling down 60s")
+            _provider_health["gemini"] = time.time()  # mark unhealthy immediately
+        _log_call("gemini", "gemini-3.6-flash", task, 0, 0, latency, False, err_str)
         print(f"[LLM Router] gemini failed: {e}")
         return None
 
@@ -355,23 +372,23 @@ def call_llm(system: str, user: str,
     Falls through providers automatically if one fails or hits limits.
     """
     TASK_ORDER = {
-        # Short prompt, JSON output → smallest fast model
-        "sql_generation":  ["groq_fast", "cerebras", "gemini", "openrouter"],
+        # Short prompt, JSON output → fastest model with most quota on Groq
+        "sql_generation":  ["groq_smart", "groq_fast", "cerebras", "gemini"],
     
-        # Long conversation history → highest context model
-        "multiturn":       ["gemini", "groq_smart", "openrouter"],
+        # Long conversation history → highest context (Gemini 1M ctx)
+        "multiturn":       ["gemini", "groq_smart", "cerebras"],
     
-        # Reasoning tasks → larger model
-        "hitl_explain":    ["groq_smart", "gemini", "openrouter"],
+        # Reasoning tasks → large model first
+        "hitl_explain":    ["groq_smart", "gemini", "cerebras"],
     
         # Bulk, stateless, short → highest throughput
         "batch_eval":      ["cerebras", "groq_fast"],
     
-        # Similarity/conflict (very short) → smallest model
-        "conflict_check":  ["groq_fast", "openrouter"],
+        # Similarity/conflict (very short prompt) → smallest fast model
+        "conflict_check":  ["groq_fast", "groq_smart"],
     }
 
-    ordered = TASK_ORDER.get(task, ["groq_fast", "gemini", "cerebras", "openrouter"])
+    ordered = TASK_ORDER.get(task, ["groq_smart", "groq_fast", "gemini", "cerebras"])
 
     for provider in ordered:
         if provider == "gemini":
