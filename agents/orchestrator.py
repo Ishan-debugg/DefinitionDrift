@@ -47,6 +47,7 @@ except ImportError:
 
 from config import settings
 from agents.core import conflict_agent, query_agent, drift_watcher
+from agents.intent_router import intent_router, CONFLICT_THRESHOLD_BY_INTENT
 from store.db import get_pending_conflicts, resolve_conflict
 
 
@@ -55,6 +56,8 @@ class QueryState(TypedDict):
     question:       str
     data_db_path:   Optional[str]
     session_id:     Optional[str]   # ← multi-turn memory key
+    intent:         Optional[str]        # ← NEW
+    intent_method:  Optional[str]        # ← NEW (for observability)
     conflict:       Optional[dict]
     conflict_id:    Optional[str]
     hitl_resolved:  bool
@@ -66,22 +69,40 @@ class QueryState(TypedDict):
 
 # ── Nodes ─────────────────────────────────────────────────────────────────────
 
-def check_conflict_node(state: QueryState) -> QueryState:
-    """Pass 1: detect if question conflicts with existing definitions."""
+def classify_intent_node(state: QueryState) -> QueryState:
+    """NEW — runs before everything else. Fast: keyword match or 80ms LLM call."""
     log = state.get("step_log", [])
-    log.append("check_conflict: running semantic similarity check")
+    intent, method = intent_router.classify(state["question"])
+    log.append(f"intent_router: {intent} (via {method})")
+    return {**state, "intent": intent, "intent_method": method, "step_log": log}
 
+
+def check_conflict_node(state: QueryState) -> QueryState:
+    """Only runs for DEFINE and AMBIGUOUS intents. Skipped for DATA."""
+    log = state.get("step_log", [])
+    intent = state.get("intent", "DATA")
+
+    threshold = CONFLICT_THRESHOLD_BY_INTENT.get(intent)
+    if threshold is None:
+        # DATA intent — skip conflict check entirely
+        log.append("check_conflict: skipped (DATA intent — no conflict check needed)")
+        return {**state, "conflict": None, "step_log": log}
+
+    # Temporarily override threshold based on intent
+    original_threshold = conflict_agent.CONFLICT_THRESHOLD
+    conflict_agent.CONFLICT_THRESHOLD = threshold
+
+    log.append(f"check_conflict: running (intent={intent}, threshold={threshold})")
     result = conflict_agent.check(state["question"])
+
+    conflict_agent.CONFLICT_THRESHOLD = original_threshold  # restore
 
     if result:
         log.append(f"check_conflict: conflict detected (sim={result['similarity']}) → HITL")
-        return {**state,
-                "conflict": result,
-                "conflict_id": result["conflict_id"],
-                "step_log": log}
-    else:
-        log.append("check_conflict: clean — proceeding to SQL generation")
-        return {**state, "conflict": None, "step_log": log}
+        return {**state, "conflict": result, "conflict_id": result["conflict_id"], "step_log": log}
+
+    log.append("check_conflict: clean — proceeding to SQL generation")
+    return {**state, "conflict": None, "step_log": log}
 
 
 def hitl_interrupt_node(state: QueryState) -> QueryState:
@@ -186,12 +207,14 @@ def build_graph():
     """
     g = StateGraph(QueryState)
 
+    g.add_node("classify_intent", classify_intent_node)
     g.add_node("check_conflict",  check_conflict_node)
     g.add_node("hitl_interrupt",  hitl_interrupt_node)
     g.add_node("run_query",       run_query_node)
     g.add_node("check_drift",     check_drift_node)
 
-    g.add_edge(START,            "check_conflict")
+    g.add_edge(START,            "classify_intent")
+    g.add_edge("classify_intent", "check_conflict")
     g.add_conditional_edges("check_conflict",  route_after_conflict,
                              {"hitl_interrupt": "hitl_interrupt", "run_query": "run_query"})
     g.add_conditional_edges("hitl_interrupt",  route_after_hitl,
@@ -255,6 +278,8 @@ def run_query_pipeline(question: str,
         "question":      question,
         "data_db_path":  data_db_path,
         "session_id":    thread_id,   # thread_id doubles as session_id
+        "intent":        None,
+        "intent_method": None,
         "conflict":      None,
         "conflict_id":   None,
         "hitl_resolved": False,
@@ -271,6 +296,8 @@ def run_query_pipeline(question: str,
             return {
                 "status": "conflict_detected",
                 "question": question,
+                "intent": final.get("intent"),
+                "intent_method": final.get("intent_method"),
                 "conflict": final["conflict"],
                 "conflict_id": final["conflict_id"],
                 "message": final["conflict"]["message"],
@@ -285,6 +312,8 @@ def run_query_pipeline(question: str,
         return {
             "status": "ok",
             "question": question,
+            "intent": final.get("intent"),
+            "intent_method": final.get("intent_method"),
             "sql_result": final.get("sql_result"),
             "drift_events": final.get("drift_events", []),
             "step_log": final.get("step_log", []),
