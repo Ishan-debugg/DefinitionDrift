@@ -284,6 +284,7 @@ def _call_openai_compat(provider_name: str, system: str, user: str,
             ],
             max_tokens=max_tokens,
             temperature=0.0,   # deterministic — same question, same SQL
+            timeout=4.0,       # 4-second hard cap per provider (Windows-safe)
         )
     
     try:

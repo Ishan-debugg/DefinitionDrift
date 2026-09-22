@@ -105,7 +105,7 @@ intent_router = IntentRouter()
 
 # ── Threshold config per intent ───────────────────────────────────────────────
 CONFLICT_THRESHOLD_BY_INTENT = {
-    "DEFINE":    0.45,   # user explicitly defining — high recall, catch everything
-    "AMBIGUOUS": 0.65,   # might be defining — moderate sensitivity
+    "DEFINE":    0.40,   # user explicitly defining — high recall, catch everything
+    "AMBIGUOUS": 0.60,   # might be defining — moderate sensitivity
     "DATA":      None,   # skip conflict check entirely
 }

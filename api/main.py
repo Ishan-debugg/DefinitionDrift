@@ -29,7 +29,8 @@ from store.db import (
     get_definition_history, upsert_definition,
     get_pending_conflicts, resolve_conflict as db_resolve,
     get_unnotified_drift, mark_drift_notified, enqueue_conflict,
-    log_query as save_query, update_feedback, get_query_history as _get_history, get_query_stats
+    log_query as save_query, update_feedback, get_query_history as _get_history, get_query_stats,
+    invalidate_sql_cache_for_definition,
 )
 from store.conversation import (
     get_session_messages, clear_session, session_summary, init_conversation_db
@@ -214,7 +215,15 @@ async def create_definition(body: DefinitionCreate, _=Depends(verify_token)):
                           sql_expr=body.sql_expr, tags=body.tags or [],
                           approved=body.approved or False,
                           reason=body.reason or "created via API")
+    # Invalidate cached SQL that used this definition (prevents stale answers)
+    invalidated = invalidate_sql_cache_for_definition(body.name)
     await manager.broadcast({"event": "definition_updated", "name": d["name"]})
+    if invalidated:
+        await manager.broadcast({
+            "event": "cache_invalidated",
+            "definition": body.name,
+            "queries_affected": invalidated
+        })
     return {"status": "ok", "definition": {**d, "tags": json.loads(d.get("tags","[]"))}}
 
 @app.get("/api/definitions/{name}")

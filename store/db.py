@@ -102,6 +102,18 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_ql_status   ON query_log(status);
         CREATE INDEX IF NOT EXISTS idx_ql_created  ON query_log(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_ql_intent   ON query_log(intent);
+
+        CREATE TABLE IF NOT EXISTS sql_cache (
+            question_hash   TEXT PRIMARY KEY,
+            question        TEXT NOT NULL,
+            sql             TEXT NOT NULL,
+            used_definitions TEXT,
+            confidence      TEXT,
+            provider        TEXT,
+            created_at      TEXT DEFAULT (datetime('now')),
+            hit_count       INTEGER DEFAULT 0,
+            last_hit        TEXT
+        );
     """)
     conn.commit()
     conn.close()
@@ -317,3 +329,62 @@ if __name__ == "__main__":
     )
     print("[DB] Seeded 3 definitions.")
     print("[DB] All definitions:", [d["name"] for d in get_all_definitions()])
+
+
+# ── SQL CACHE ──────────────────────────────────────────────────────────────────
+
+def get_cached_sql(question: str) -> Optional[dict]:
+    """Return cached SQL for an exact question match, or None."""
+    h = hashlib.md5(question.strip().lower().encode()).hexdigest()
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM sql_cache WHERE question_hash=?", (h,)
+    ).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE sql_cache SET hit_count=hit_count+1, last_hit=datetime('now') WHERE question_hash=?",
+            (h,)
+        )
+        conn.commit()
+    conn.close()
+    return dict(row) if row else None
+
+
+def cache_sql(question: str, sql: str, used_definitions: list,
+             confidence: str, provider: str) -> None:
+    """Cache a high-confidence SQL result for deterministic repeated queries."""
+    h = hashlib.md5(question.strip().lower().encode()).hexdigest()
+    conn = get_conn()
+    conn.execute("""
+        INSERT OR IGNORE INTO sql_cache
+        (question_hash, question, sql, used_definitions, confidence, provider)
+        VALUES (?,?,?,?,?,?)
+    """, (h, question.strip(), sql,
+          json.dumps(used_definitions), confidence, provider))
+    conn.commit()
+    conn.close()
+
+
+def invalidate_sql_cache_for_definition(def_name: str) -> int:
+    """Remove cached SQL entries that used this definition.
+    Called whenever a definition is updated to prevent stale answers.
+    Returns count of invalidated entries.
+    """
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT question_hash, used_definitions FROM sql_cache"
+    ).fetchall()
+    to_delete = []
+    for row in rows:
+        used = json.loads(row["used_definitions"] or "[]")
+        if def_name in used:
+            to_delete.append(row["question_hash"])
+    if to_delete:
+        placeholders = ','.join('?' * len(to_delete))
+        conn.execute(
+            f"DELETE FROM sql_cache WHERE question_hash IN ({placeholders})",
+            to_delete
+        )
+        conn.commit()
+    conn.close()
+    return len(to_delete)

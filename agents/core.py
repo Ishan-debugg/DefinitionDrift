@@ -14,6 +14,7 @@ from pathlib import Path
 from store.db import (
     get_all_definitions, enqueue_conflict,
     save_schema_snapshot, log_drift,
+    get_cached_sql, cache_sql,
 )
 from store.conversation import get_conversation_context, add_message
 from embeddings.engine import embed, cosine_similarity
@@ -431,6 +432,24 @@ class QueryAgent:
         data_db_path: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> dict:
+        # ── Cache check — guarantees consistency for repeated questions ────────
+        cached = get_cached_sql(question)
+        if cached:
+            result = {
+                "sql":              cached["sql"],
+                "used_definitions": json.loads(cached["used_definitions"] or "[]"),
+                "confidence":       cached["confidence"],
+                "explanation":      "Served from definition cache.",
+                "warning":          None,
+                "provider_used":    f"cache({cached['provider']})",
+                "definitions_injected": 0,
+                "cache_hit":        True,
+            }
+            if data_db_path and result["sql"]:
+                result["query_result"] = self._execute(result["sql"], data_db_path)
+            self._save_to_memory(session_id, question, result)
+            return result
+
         # ── Ensure schema introspection has run ──────────────────────────────
         if not schema_introspector.get_schema_block() and data_db_path:
             schema_introspector.introspect(data_db_path)
@@ -544,6 +563,17 @@ class QueryAgent:
 
         # ── Save to conversation memory ───────────────────────────────────────
         self._save_to_memory(session_id, question, result)
+
+        # ── Cache high-confidence results for consistency ─────────────────────
+        if result.get("confidence") == "high" and result.get("sql"):
+            cache_sql(
+                question=question,
+                sql=result["sql"],
+                used_definitions=result.get("used_definitions", []),
+                confidence=result["confidence"],
+                provider=result.get("provider_used", "")
+            )
+
         return result
 
     def _save_to_memory(self, session_id: Optional[str], question: str, result: dict):
