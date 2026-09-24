@@ -416,21 +416,25 @@ def invalidate_sql_cache_for_definition(def_name: str) -> int:
 
 # ── QUERY LOG ─────────────────────────────────────────────────────────────────
 
-def log_query(session_id: str, question: str, status: str,
-              intent: str = None, provider: str = None,
-              latency_ms: int = None, sql_result: str = None,
+def log_query(id: str = None, session_id: str = None, question: str = "",
+              status: str = "", intent: str = None, provider: str = None,
+              latency_ms: int = None, sql_result=None,
               used_definitions: list = None) -> str:
-    """Log a query attempt. Returns the generated query ID."""
+    """Log a query attempt. Returns the query ID."""
     conn = get_conn()
-    query_id = hashlib.md5(f"{session_id}{question}{datetime.utcnow().isoformat()}".encode()).hexdigest()[:16]
+    query_id = id or hashlib.md5(
+        f"{session_id}{question}{datetime.utcnow().isoformat()}".encode()
+    ).hexdigest()[:16]
+    # Serialize complex objects
+    sql_str = json.dumps(sql_result) if isinstance(sql_result, dict) else (sql_result or "")
+    defs_str = json.dumps(used_definitions) if isinstance(used_definitions, list) else (used_definitions or "[]")
     conn.execute("""
         INSERT OR IGNORE INTO query_log
         (id, session_id, question, status, intent, provider, latency_ms, sql_result, used_definitions)
         VALUES (?,?,?,?,?,?,?,?,?)
     """, (
         query_id, session_id, question, status,
-        intent, provider, latency_ms, sql_result,
-        json.dumps(used_definitions or [])
+        intent, provider, latency_ms, sql_str, defs_str
     ))
     conn.commit()
     conn.close()
