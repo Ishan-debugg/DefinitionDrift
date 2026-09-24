@@ -412,3 +412,76 @@ def invalidate_sql_cache_for_definition(def_name: str) -> int:
         conn.commit()
     conn.close()
     return len(to_delete)
+
+
+# ── QUERY LOG ─────────────────────────────────────────────────────────────────
+
+def log_query(session_id: str, question: str, status: str,
+              intent: str = None, provider: str = None,
+              latency_ms: int = None, sql_result: str = None,
+              used_definitions: list = None) -> str:
+    """Log a query attempt. Returns the generated query ID."""
+    conn = get_conn()
+    query_id = hashlib.md5(f"{session_id}{question}{datetime.utcnow().isoformat()}".encode()).hexdigest()[:16]
+    conn.execute("""
+        INSERT OR IGNORE INTO query_log
+        (id, session_id, question, status, intent, provider, latency_ms, sql_result, used_definitions)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (
+        query_id, session_id, question, status,
+        intent, provider, latency_ms, sql_result,
+        json.dumps(used_definitions or [])
+    ))
+    conn.commit()
+    conn.close()
+    return query_id
+
+
+def update_feedback(query_id: str, feedback: int) -> bool:
+    """Update thumbs up (1) / thumbs down (-1) feedback for a logged query."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE query_log SET feedback=? WHERE id=?", (feedback, query_id)
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_query_history(session_id: str = None, limit: int = 50) -> list[dict]:
+    """Return recent query log entries, optionally filtered by session."""
+    conn = get_conn()
+    if session_id:
+        rows = conn.execute(
+            "SELECT * FROM query_log WHERE session_id=? ORDER BY created_at DESC LIMIT ?",
+            (session_id, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM query_log ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_query_stats() -> dict:
+    """Return aggregate statistics from the query log."""
+    conn = get_conn()
+    total = conn.execute("SELECT COUNT(*) FROM query_log").fetchone()[0]
+    by_status = conn.execute(
+        "SELECT status, COUNT(*) as cnt FROM query_log GROUP BY status"
+    ).fetchall()
+    by_intent = conn.execute(
+        "SELECT intent, COUNT(*) as cnt FROM query_log WHERE intent IS NOT NULL GROUP BY intent"
+    ).fetchall()
+    avg_latency = conn.execute(
+        "SELECT AVG(latency_ms) FROM query_log WHERE latency_ms IS NOT NULL"
+    ).fetchone()[0]
+    conn.close()
+    return {
+        "total_queries": total,
+        "by_status": {r["status"]: r["cnt"] for r in by_status},
+        "by_intent": {r["intent"]: r["cnt"] for r in by_intent},
+        "avg_latency_ms": round(avg_latency or 0, 1),
+    }
