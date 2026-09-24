@@ -12,17 +12,41 @@ Tables:
 import sqlite3
 import json
 import hashlib
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+try:
+    import libsql_experimental
+except ImportError:
+    libsql_experimental = None
 
 DB_PATH = Path(__file__).parent.parent / "definitiondrift.db"
 
 
+_TURSO_URL = os.getenv("TURSO_DATABASE_URL")
+_TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+_USE_TURSO = bool(_TURSO_URL and _TURSO_TOKEN and libsql_experimental)
+
+if _USE_TURSO:
+    print(f"[DB] 🌐 Using Turso cloud database: {_TURSO_URL}")
+else:
+    print(f"[DB] 💾 Using local SQLite: {DB_PATH}")
+
+
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    if _USE_TURSO:
+        conn = libsql_experimental.connect(_TURSO_URL, auth_token=_TURSO_TOKEN)
+    else:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    if not _USE_TURSO:
+        conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 

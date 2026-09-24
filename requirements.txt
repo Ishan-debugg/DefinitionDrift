@@ -36,6 +36,9 @@ httpx>=0.27.0
 # Utilities
 python-dotenv>=1.0.0
 
+# Database
+libsql-experimental>=0.0.37
+
 # Optional DB drivers — uncomment what you need:
 # psycopg2-binary    # PostgreSQL
 # pymysql            # MySQL / MariaDB
