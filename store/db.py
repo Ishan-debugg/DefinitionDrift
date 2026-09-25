@@ -30,7 +30,7 @@ DB_PATH = Path(__file__).parent.parent / "definitiondrift.db"
 
 _TURSO_URL = os.getenv("TURSO_DATABASE_URL")
 _TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
-_USE_TURSO = bool(_TURSO_URL and _TURSO_TOKEN and libsql_experimental)
+_USE_TURSO = False # Temporarily disabled due to libsql_experimental row_factory bug
 
 if _USE_TURSO:
     print(f"[DB] 🌐 Using Turso cloud database: {_TURSO_URL}")
