@@ -3,9 +3,16 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Strata — Data Intelligence',
-  description: 'Turn complexity into signal with a living intelligence layer for modern data teams.',
-  generator: 'v0.app',
+  title: 'DefinitionDrift — AI Data Governance',
+  description: 'Enterprise-grade text-to-SQL with a Human-in-the-Loop governance layer. Never query unapproved metrics again.',
+  generator: 'DefinitionDrift',
+  openGraph: {
+    title: 'DefinitionDrift — AI Data Governance',
+    description: 'Enterprise-grade text-to-SQL with a Human-in-the-Loop governance layer.',
+    url: 'https://definitiondrift.ishan-tarkas.in',
+    siteName: 'DefinitionDrift',
+    type: 'website',
+  },
   icons: {
     icon: [
       {
