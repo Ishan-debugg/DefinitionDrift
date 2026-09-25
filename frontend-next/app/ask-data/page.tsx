@@ -19,9 +19,10 @@ interface QueryResponse {
   query_id: string
   session_id: string
   latency_ms: number
-  status: 'ok' | 'conflict_detected' | 'error'
+  status: 'ok' | 'conflict_detected' | 'define_request' | 'error'
   question: string
   intent?: string
+  pending_id?: string
   sql_result?: SqlResult
   conflict?: {
     conflict_id: string
@@ -213,7 +214,30 @@ export default function AskDataPage() {
             </div>
           )}
 
-          {/* Successful answer */}
+          {/* Define request → Governance pending card */}
+          {result?.status === 'define_request' && !loading && (
+            <div className="conflict-card" style={{ borderColor: 'rgba(251,191,36,.5)', background: 'rgba(251,191,36,.05)' }}>
+              <div className="conflict-title" style={{ borderColor: 'rgba(251,191,36,.3)' }}>
+                <span style={{ color: '#fbbf24' }}>📋 Governance Approval Required</span>
+                <small style={{ background: 'rgba(251,191,36,.2)', color: '#fbbf24' }}>PENDING ADMIN REVIEW</small>
+              </div>
+              <p style={{ marginTop: 12, lineHeight: 1.7 }}>
+                <strong>New metric definition request detected.</strong><br />
+                {result.message}
+              </p>
+              <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(251,191,36,.08)', borderRadius: 8, border: '1px solid rgba(251,191,36,.2)', fontSize: 13 }}>
+                <strong>📊 Your question:</strong> &ldquo;{result.question}&rdquo;<br />
+                <span style={{ opacity: 0.7, marginTop: 6, display: 'block' }}>An admin can approve this via the <strong>HITL Queue</strong> tab → approve the pending request to add it to the governed registry.</span>
+              </div>
+              <div className="conflict-actions" style={{ marginTop: 16 }}>
+                <button onClick={() => setResult(null)} style={{ background: 'rgba(251,191,36,.15)', borderColor: 'rgba(251,191,36,.4)', color: '#fbbf24' }}>
+                  ✓ Got it — Check HITL Queue
+                </button>
+              </div>
+            </div>
+          )}
+
+
           {result?.status === 'ok' && sqlResult && !loading && (
             <div className="answer-card">
               <div className="answer-head">

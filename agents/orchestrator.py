@@ -292,6 +292,7 @@ def run_query_pipeline(question: str,
     try:
         final = graph.invoke(initial_state, config=config)
 
+        # ── HITL: Conflict between two definitions ─────────────────────────────
         if final.get("conflict") and not final.get("hitl_resolved"):
             return {
                 "status": "conflict_detected",
@@ -304,6 +305,36 @@ def run_query_pipeline(question: str,
                 "action_required": (
                     f"Resolve at: POST /api/hitl/resolve "
                     f"with conflict_id='{final['conflict_id']}'"
+                ),
+                "drift_events": [],
+                "step_log": final.get("step_log", []),
+            }
+
+        # ── HITL: New definition creation request ─────────────────────────────
+        # If intent is DEFINE but no conflict found (brand-new metric),
+        # surface a human-approval card instead of silently doing nothing.
+        if final.get("intent") == "DEFINE" and not final.get("conflict"):
+            import hashlib, time
+            pending_id = hashlib.md5(f"{question}{time.time()}".encode()).hexdigest()[:12]
+            # Enqueue in hitl_queue as a define_request for audit trail
+            from store.db import enqueue_conflict
+            enqueue_conflict(
+                question_a=question,
+                question_b="NEW_DEFINITION_REQUEST",
+                def_a=None,
+                def_b=None,
+                similarity=0.0,
+            )
+            return {
+                "status": "define_request",
+                "question": question,
+                "intent": "DEFINE",
+                "intent_method": final.get("intent_method"),
+                "pending_id": pending_id,
+                "message": (
+                    f"Your request to create a new metric definition has been "
+                    f"queued for human review. An admin must approve it before it "
+                    f"becomes part of the governed metric registry."
                 ),
                 "drift_events": [],
                 "step_log": final.get("step_log", []),
