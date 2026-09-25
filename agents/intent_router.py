@@ -28,6 +28,9 @@ DEFINE_SIGNALS = [
     "update the definition", "change the definition", "rename", "what should we call",
     "let's say", "going forward", "from now on", "standardize", "canonical",
     "how do we define", "how should we define",
+    # Additional update/modify signals
+    "update", "modify", "change", "revise", "edit", "alter", "redefine",
+    "gross margin", "total margin", "margin definition",
 ]
 
 # Keywords that strongly signal DATA intent — skip LLM if matched
@@ -107,5 +110,5 @@ intent_router = IntentRouter()
 CONFLICT_THRESHOLD_BY_INTENT = {
     "DEFINE":    0.40,   # user explicitly defining — high recall, catch everything
     "AMBIGUOUS": 0.60,   # might be defining — moderate sensitivity
-    "DATA":      None,   # skip conflict check entirely
+    "DATA":      0.85,   # even data queries: flag if very close to an unapproved definition
 }

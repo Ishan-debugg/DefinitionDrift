@@ -78,14 +78,14 @@ def classify_intent_node(state: QueryState) -> QueryState:
 
 
 def check_conflict_node(state: QueryState) -> QueryState:
-    """Only runs for DEFINE and AMBIGUOUS intents. Skipped for DATA."""
+    """Runs conflict check for DEFINE, AMBIGUOUS, and DATA intents with a threshold."""
     log = state.get("step_log", [])
     intent = state.get("intent", "DATA")
 
     threshold = CONFLICT_THRESHOLD_BY_INTENT.get(intent)
     if threshold is None:
-        # DATA intent — skip conflict check entirely
-        log.append("check_conflict: skipped (DATA intent — no conflict check needed)")
+        # No threshold set — skip conflict check
+        log.append(f"check_conflict: skipped (intent={intent}, no threshold configured)")
         return {**state, "conflict": None, "step_log": log}
 
     # Temporarily override threshold based on intent
