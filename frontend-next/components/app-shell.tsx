@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { BarChart3, BookOpen, Bot, CircleAlert, Database, Gauge, Menu, Settings, ShieldCheck, X } from 'lucide-react'
+import { BarChart3, BookOpen, Bot, CircleAlert, Database, Menu, Settings, X } from 'lucide-react'
 import { useState } from 'react'
 
 const nav = [
@@ -21,9 +21,39 @@ export function AppShell({ children, title, eyebrow }: { children: React.ReactNo
 
 export function PageFrame({ children, title, eyebrow }: { children: React.ReactNode; title: string; eyebrow: string }) { return <AppShell title={title} eyebrow={eyebrow}>{children}</AppShell> }
 
+// ── API helpers ───────────────────────────────────────────────────────────────
 export const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-export const apiFetch = (path: string, options?: RequestInit) => fetch(`${apiUrl}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) } }).then(async r => { if (!r.ok) throw new Error(`Request failed: ${r.status}`); return r.json() })
+export const adminToken = process.env.NEXT_PUBLIC_ADMIN_TOKEN || ''
 
-export const definitions = [{ id: 'gross-sales', name: 'Gross Sales', description: 'Total value of all orders before discounts, returns, and taxes.', sql: 'SUM(order_total)', tags: ['revenue', 'commerce'], owner: 'Finance' }, { id: 'net-revenue', name: 'Net Revenue', description: 'Gross sales minus discounts and returns, excluding tax.', sql: 'SUM(order_total - discounts - returns)', tags: ['revenue', 'finance'], owner: 'Finance' }, { id: 'active-customers', name: 'Active Customers', description: 'Unique customers with at least one completed order in the period.', sql: 'COUNT(DISTINCT customer_id)', tags: ['customers', 'growth'], owner: 'Growth' }, { id: 'repeat-rate', name: 'Repeat Purchase Rate', description: 'Share of customers who placed more than one completed order.', sql: 'repeat_customers / total_customers', tags: ['retention'], owner: 'Growth' }]
-export const conflicts = [{ id: 'conf-102', question: 'What was our revenue last month?', matched: 'Net Revenue', score: '82%', definition: 'Revenue means gross sales less refunds, before tax.' }, { id: 'conf-098', question: 'How many active accounts do we have?', matched: 'Active Customers', score: '76%', definition: 'Active account means a customer with a login in the last 30 days.' }]
-export const stats = [{ label: 'Total queries', value: '12,842', change: '+18.4%' }, { label: 'Avg latency', value: '1.24s', change: '-12.8%' }, { label: 'Cache hit rate', value: '68.4%', change: '+8.2%' }, { label: 'Active definitions', value: '42', change: '+6' }]
+/**
+ * apiFetch — wraps fetch with base URL + JSON content-type.
+ * Automatically adds X-API-Key for write operations (POST/PUT/DELETE).
+ */
+export const apiFetch = (path: string, options?: RequestInit) => {
+  const method = options?.method?.toUpperCase() || 'GET'
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string> || {}),
+  }
+  if (isWrite && adminToken) {
+    headers['X-API-Key'] = adminToken
+  }
+  return fetch(`${apiUrl}${path}`, { ...options, headers }).then(async r => {
+    if (!r.ok) throw new Error(`Request failed: ${r.status}`)
+    return r.json()
+  })
+}
+
+// ── Fallback / demo data (used when API is unreachable) ───────────────────────
+export const definitions = [
+  { id: 'gross-sales', name: 'Gross Sales', description: 'Total value of all orders before discounts, returns, and taxes.', sql: 'SUM(SalesAmount)', tags: ['revenue', 'commerce'], owner: 'Finance', approved: true },
+  { id: 'net-revenue', name: 'Net Revenue', description: 'Gross sales minus discounts and returns, excluding tax.', sql: 'SUM(SalesAmount - ReturnAmount)', tags: ['revenue', 'finance'], owner: 'Finance', approved: true },
+  { id: 'active-customers', name: 'Active Customers', description: 'Unique customers with at least one completed order in the period.', sql: 'COUNT(DISTINCT CustomerKey)', tags: ['customers', 'growth'], owner: 'Growth', approved: true },
+  { id: 'repeat-rate', name: 'Repeat Purchase Rate', description: 'Share of customers who placed more than one completed order.', sql: 'repeat_customers / total_customers', tags: ['retention'], owner: 'Growth', approved: true },
+]
+
+export const conflicts = [
+  { id: 'conf-102', question: 'What was our revenue last month?', matched: 'Net Revenue', score: '82%', definition: 'Revenue means gross sales less refunds, before tax.' },
+  { id: 'conf-098', question: 'How many active accounts do we have?', matched: 'Active Customers', score: '76%', definition: 'Active account means a customer with a login in the last 30 days.' },
+]
