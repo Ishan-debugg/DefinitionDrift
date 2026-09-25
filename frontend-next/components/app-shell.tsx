@@ -39,7 +39,8 @@ export const apiFetch = (path: string, options?: RequestInit) => {
   if (isWrite && adminToken) {
     headers['X-API-Key'] = adminToken
   }
-  return fetch(`${apiUrl}${path}`, { ...options, headers }).then(async r => {
+  const cleanApiUrl = apiUrl.replace(/\/$/, '')
+  return fetch(`${cleanApiUrl}${path}`, { ...options, headers }).then(async r => {
     if (!r.ok) throw new Error(`Request failed: ${r.status}`)
     return r.json()
   })
