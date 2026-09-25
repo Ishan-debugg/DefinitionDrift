@@ -116,7 +116,7 @@ def _sentence_transformers_installed() -> bool:
     import importlib.util
     return importlib.util.find_spec("sentence_transformers") is not None
 
-_ST_AVAILABLE: bool = _sentence_transformers_installed()
+_ST_AVAILABLE: bool = False # Forced to false for Render Free tier memory limit
 
 if not _ST_AVAILABLE:
     print(
