@@ -38,14 +38,12 @@ else:
     print(f"[DB] 💾 Using local SQLite: {DB_PATH}")
 
 
-def get_conn() -> sqlite3.Connection:
+def get_conn():
     if _USE_TURSO:
         conn = libsql_experimental.connect(_TURSO_URL, auth_token=_TURSO_TOKEN)
     else:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-
-    conn.row_factory = sqlite3.Row
-    if not _USE_TURSO:
+        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
@@ -484,8 +482,9 @@ def get_query_stats() -> dict:
     ).fetchone()[0]
     conn.close()
     return {
-        "total_queries": total,
+        "total": total,
         "by_status": {r["status"]: r["cnt"] for r in by_status},
         "by_intent": {r["intent"]: r["cnt"] for r in by_intent},
-        "avg_latency_ms": round(avg_latency or 0, 1),
+        "avg_latency": round(avg_latency or 0, 1),
+        "ok_count": next((r["cnt"] for r in by_status if r["status"] == "ok"), 0)
     }
