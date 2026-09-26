@@ -83,5 +83,5 @@ You can test the AI agent and trigger the Human-in-the-Loop governance layer her
 ---
 
 <div align="center">
-  <small>Built with ❤️ by Ishan</small>
+  <small>mail - tarkasishan7536@gmail.com</small>
 </div>
