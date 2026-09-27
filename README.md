@@ -14,7 +14,7 @@
 ---
 
 ## 🛑 The Problem
-Traditional Text-to-SQL AI agents suffer from a massive flaw: **Metric Hallucination**. If you ask an AI *"What is our net revenue?"*, the AI will blindly guess the SQL formula based on the column names it sees in the database. 
+Traditional Text-to-SQL AI agents suffer from a massive flaw: **Metric Hallucination**. If you ask an AI *"What is our net revenue?"*, the AI will blindly guess the SQL formula based on the column names it sees in the database.can lead to false and irrelevant info or ans.
 
 Different analysts define "Net Revenue" differently (e.g., should it include tax? returns? shipping?). When the AI guesses the formula, it provides **highly convincing, yet completely inaccurate data**, causing business leaders to make decisions based on false metrics.
 
