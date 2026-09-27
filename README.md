@@ -74,6 +74,10 @@ You can test the AI agent and trigger the Human-in-the-Loop governance layer her
 
 ## 🏗️ Architecture
 
+## Architecture
+
+![Architecture Diagram](frontend-next/public/diagram.png)
+
 1. **Intent Router:** The user's query hits a fast LLM classifier. If it's a simple data request, it moves forward. If the user is trying to define a new metric, it routes to the Conflict Agent.
 2. **Conflict Agent (Vector Search):** The AI searches the Definition Registry using embeddings to see if this metric already exists or if it conflicts with an unapproved metric.
 3. **HITL Interrupt:** If a conflict or unapproved metric is found, the LangGraph state is paused. A ticket is sent to the Admin Dashboard.
