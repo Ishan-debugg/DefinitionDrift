@@ -88,6 +88,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "message": "Backend is awake!"}
+
 def send_drift_digest():
     if not DRIFT_WEBHOOK_URL:
         return
