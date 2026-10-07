@@ -156,7 +156,26 @@ def _pg_conn():
     global _pg_pool
     if _pg_pool is None:
         from psycopg2.pool import ThreadedConnectionPool
-        _pg_pool = ThreadedConnectionPool(1, 10, _DATABASE_URL)
+        _pg_pool = ThreadedConnectionPool(
+            1, 10, _DATABASE_URL,
+            keepalives=1, keepalives_idle=30,
+            keepalives_interval=10, keepalives_count=5,
+        )
+    # Validate the connection; Neon closes idle SSL connections.
+    for _ in range(3):
+        raw = _pg_pool.getconn()
+        try:
+            if raw.closed:
+                raise Exception("closed")
+            with raw.cursor() as c:
+                c.execute("SELECT 1")
+            raw.rollback()
+            return _PgConn(raw, _pg_pool)
+        except Exception:
+            try:
+                _pg_pool.putconn(raw, close=True)
+            except Exception:
+                pass
     return _PgConn(_pg_pool.getconn(), _pg_pool)
 
 
@@ -166,9 +185,12 @@ def get_conn():
     if _USE_TURSO:
         conn = libsql_experimental.connect(_TURSO_URL, auth_token=_TURSO_TOKEN)
     else:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 

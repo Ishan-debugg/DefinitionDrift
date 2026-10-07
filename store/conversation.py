@@ -32,9 +32,12 @@ def _conn() -> sqlite3.Connection:
     """Return a thread-local persistent connection."""
     if not hasattr(_conv_local, 'conn') or _conv_local.conn is None:
         CONV_DB.parent.mkdir(parents=True, exist_ok=True)
-        _conv_local.conn = sqlite3.connect(CONV_DB, check_same_thread=False)
+        _conv_local.conn = sqlite3.connect(CONV_DB, check_same_thread=False, timeout=30)
         _conv_local.conn.row_factory = sqlite3.Row
-        _conv_local.conn.execute("PRAGMA journal_mode=WAL")
+        try:
+            _conv_local.conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass  # another instance holds the lock; WAL is persistent anyway
     return _conv_local.conn
 
 

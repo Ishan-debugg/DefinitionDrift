@@ -19,7 +19,7 @@ slowapi>=0.1.9              # rate limiting
 sqlglot>=23.0.0
 
 # Embeddings (local, free, runs on CPU)
-sentence-transformers>=3.0.0
+# sentence-transformers>=3.0.0 (Temporarily disabled due to Render free tier memory limits)
 
 # Multi-database support
 sqlalchemy>=2.0.0

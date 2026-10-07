@@ -40,8 +40,11 @@ def _get_cache_conn() -> sqlite3.Connection:
     """Return a persistent cache DB connection (not opened/closed per call)."""
     global _cache_conn
     if _cache_conn is None:
-        _cache_conn = sqlite3.connect(CACHE_DB, check_same_thread=False)
-        _cache_conn.execute("PRAGMA journal_mode=WAL")
+        _cache_conn = sqlite3.connect(CACHE_DB, check_same_thread=False, timeout=30)
+        try:
+            _cache_conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass  # another instance holds the lock; WAL is persistent anyway
     return _cache_conn
 
 def _init_cache():
