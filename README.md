@@ -9,12 +9,6 @@
     <a href="#features">Features</a> • 
     <a href="#architecture">Architecture</a>
   </p>
-
-  <p>
-    <a href="https://gitdiagram.com/ishan-debugg/definitiondrift?utm_source=readme&utm_medium=badge">
-      <img src="https://gitdiagram.com/diagram-badge.svg" alt="Architecture Diagram">
-    </a>
-  </p>
 </div>
 ---
 
