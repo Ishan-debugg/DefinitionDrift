@@ -40,5 +40,5 @@ python-dotenv>=1.0.0
 libsql-experimental>=0.0.37
 
 # Optional DB drivers — uncomment what you need:
-# psycopg2-binary    # PostgreSQL
+psycopg2-binary>=2.9.9   # PostgreSQL (used when DATABASE_URL is set)
 # pymysql            # MySQL / MariaDB

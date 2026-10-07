@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { BarChart3, BookOpen, Bot, CircleAlert, Database, Menu, Settings, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const nav = [
   { href: '/', label: 'Home', icon: Bot },
@@ -16,7 +16,9 @@ export function AppShell({ children, title, eyebrow }: { children: React.ReactNo
   const [open, setOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [compact, setCompact] = useState(false)
-  return <div className={`app-shell${compact ? ' compact-mode' : ''}`}><aside className={open ? 'sidebar open' : 'sidebar'}><div className="app-logo"><span className="logo-grid"><i /><i /><i /></span><span><b>DEFINITION DRIFT</b><small>INTELLIGENCE OS</small></span></div><nav className="app-nav">{nav.map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setOpen(false)}><Icon />{label}</Link>)}</nav><div className="sidebar-bottom"><button className="sources-link" type="button" onClick={() => setSettingsOpen(true)}><Database /> <span>Connected sources<small>4 systems online</small></span></button><button className="settings-link" type="button" onClick={() => setSettingsOpen(true)}><Settings /> Settings</button></div></aside><button className="mobile-menu" aria-label="Toggle navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button><main className="app-main"><header className="app-header"><div><p className="app-eyebrow">{eyebrow}</p><h1>{title}</h1></div><div className="status-chip"><span /> Systems nominal</div></header>{children}</main>{settingsOpen && <div className="settings-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}><section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}><div className="settings-heading"><div><p className="app-eyebrow">WORKSPACE PREFERENCES</p><h2 id="settings-title">Settings</h2></div><button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X /></button></div><label className="setting-row"><span><b>Compact workspace</b><small>Reduce spacing across dashboard panels.</small></span><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /></label><label className="setting-row"><span><b>Connected sources</b><small>Show the four connected systems as online.</small></span><input type="checkbox" defaultChecked /></label><button className="solid-button settings-done" type="button" onClick={() => setSettingsOpen(false)}>Save settings</button></section></div>}</div>
+  const [profileId, setProfileId] = useState('')
+  useEffect(() => { setProfileId(getUserId()) }, [])
+  return <div className={`app-shell${compact ? ' compact-mode' : ''}`}><aside className={open ? 'sidebar open' : 'sidebar'}><div className="app-logo"><span className="logo-grid"><i /><i /><i /></span><span><b>DEFINITION DRIFT</b><small>INTELLIGENCE OS</small></span></div><nav className="app-nav">{nav.map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setOpen(false)}><Icon />{label}</Link>)}</nav><div className="sidebar-bottom"><button className="sources-link" type="button" onClick={() => setSettingsOpen(true)}><Database /> <span>Connected sources<small>4 systems online</small></span></button><button className="settings-link" type="button" onClick={() => setSettingsOpen(true)}><Settings /> Settings</button></div></aside><button className="mobile-menu" aria-label="Toggle navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button><main className="app-main"><header className="app-header"><div><p className="app-eyebrow">{eyebrow}</p><h1>{title}</h1></div><div className="status-chip"><span /> Systems nominal</div></header>{children}</main>{settingsOpen && <div className="settings-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}><section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}><div className="settings-heading"><div><p className="app-eyebrow">WORKSPACE PREFERENCES</p><h2 id="settings-title">Settings</h2></div><button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X /></button></div><label className="setting-row"><span><b>Compact workspace</b><small>Reduce spacing across dashboard panels.</small></span><input type="checkbox" checked={compact} onChange={(event) => setCompact(event.target.checked)} /></label><label className="setting-row"><span><b>Connected sources</b><small>Show the four connected systems as online.</small></span><input type="checkbox" defaultChecked /></label><div className="setting-row"><span><b>Your profile</b><small>Anonymous ID · {profileId ? profileId.slice(0, 8) : '…'} — your queries, definitions, HITL queue and analytics are private to this browser.</small></span><button type="button" className="ghost-button" onClick={() => { if (confirm('Start a fresh profile? Your current history stays saved under the old ID.')) { resetUserId(); location.reload() } }}>Reset</button></div><button className="solid-button settings-done" type="button" onClick={() => setSettingsOpen(false)}>Save settings</button></section></div>}</div>
 }
 
 export function PageFrame({ children, title, eyebrow }: { children: React.ReactNode; title: string; eyebrow: string }) { return <AppShell title={title} eyebrow={eyebrow}>{children}</AppShell> }
@@ -25,9 +27,29 @@ export function PageFrame({ children, title, eyebrow }: { children: React.ReactN
 export const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
 export const adminToken = process.env.NEXT_PUBLIC_ADMIN_TOKEN || ''
 
+// ── Anonymous profile ───────────────────────────────────────────────────────────────
+// Each browser gets a UUID on first visit; the backend scopes all data to it.
+const USER_KEY = 'dd_user_id'
+
+function newId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return 'u-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12)
+}
+
+export function getUserId(): string {
+  if (typeof window === 'undefined') return ''
+  let id = localStorage.getItem(USER_KEY)
+  if (!id) { id = newId(); localStorage.setItem(USER_KEY, id) }
+  return id
+}
+
+export function resetUserId() {
+  localStorage.setItem(USER_KEY, newId())
+}
+
 /**
  * apiFetch — wraps fetch with base URL + JSON content-type.
- * Automatically adds X-API-Key for write operations (POST/PUT/DELETE).
+ * Adds X-User-Id on every call and X-API-Key for write operations (POST/PUT/DELETE).
  */
 export const apiFetch = (path: string, options?: RequestInit) => {
   const method = options?.method?.toUpperCase() || 'GET'
@@ -36,6 +58,8 @@ export const apiFetch = (path: string, options?: RequestInit) => {
     'Content-Type': 'application/json',
     ...(options?.headers as Record<string, string> || {}),
   }
+  const userId = getUserId()
+  if (userId) headers['X-User-Id'] = userId
   if (isWrite && adminToken) {
     headers['X-API-Key'] = adminToken
   }

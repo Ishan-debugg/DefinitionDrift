@@ -31,7 +31,11 @@ from store.db import (
     get_unnotified_drift, mark_drift_notified, enqueue_conflict,
     log_query as save_query, update_feedback, get_query_history as _get_history, get_query_stats,
     invalidate_sql_cache_for_definition,
+    set_current_user, get_current_user, ensure_user, get_definition_usage, DEFAULT_USER,
 )
+import re
+import contextvars
+from starlette.concurrency import run_in_threadpool
 from store.conversation import (
     get_session_messages, clear_session, session_summary, init_conversation_db
 )
@@ -88,6 +92,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Per-user profiles (anonymous UUID from the browser) ────────────────────────────
+_USER_ID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+_known_users: set[str] = set()
+
+
+def _clean_user_id(raw: Optional[str]) -> str:
+    return raw if raw and _USER_ID_RE.match(raw) else DEFAULT_USER
+
+
+@app.middleware("http")
+async def user_scope(request: Request, call_next):
+    """Scope every DB read/write in this request to the caller's profile."""
+    uid = _clean_user_id(request.headers.get("x-user-id"))
+    set_current_user(uid)
+    if uid != DEFAULT_USER and uid not in _known_users:
+        await run_in_threadpool(ensure_user, uid)  # creates + seeds on first visit
+        _known_users.add(uid)
+    return await call_next(request)
+
+
+@app.get("/api/profile")
+def profile():
+    uid = get_current_user()
+    q = get_query_stats()
+    return {"user_id": uid, "queries": q["total"],
+            "definitions": len(get_all_definitions()),
+            "pending_conflicts": len(get_pending_conflicts())}
+
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "Backend is awake!"}
@@ -129,14 +161,18 @@ def start_scheduler():
 
 # ── WebSocket connection manager ──────────────────────────────────────────────
 class ConnectionManager:
-    def __init__(self): self.active: list[WebSocket] = []
-    async def connect(self, ws: WebSocket):
-        await ws.accept(); self.active.append(ws)
+    """WebSocket fan-out, partitioned by user so events never leak across profiles."""
+    def __init__(self): self.active: list[tuple[WebSocket, str]] = []
+    async def connect(self, ws: WebSocket, user_id: str = DEFAULT_USER):
+        await ws.accept(); self.active.append((ws, user_id))
     def disconnect(self, ws: WebSocket):
-        self.active = [w for w in self.active if w != ws]
-    async def broadcast(self, msg: dict):
+        self.active = [(w, u) for (w, u) in self.active if w != ws]
+    async def broadcast(self, msg: dict, user_id: Optional[str] = None):
+        target = user_id or get_current_user()
         dead = []
-        for ws in self.active:
+        for ws, uid in self.active:
+            if uid != target:
+                continue
             try: await ws.send_json(msg)
             except: dead.append(ws)
         for ws in dead: self.disconnect(ws)
@@ -230,6 +266,11 @@ async def create_definition(body: DefinitionCreate, _=Depends(verify_token)):
         })
     return {"status": "ok", "definition": {**d, "tags": json.loads(d.get("tags","[]"))}}
 
+@app.get("/api/definitions/usage")
+def definition_usage():
+    """Shows which of this user's definitions are actually being used."""
+    return {"usage": get_definition_usage()}
+
 @app.get("/api/definitions/{name}")
 def get_definition(name: str):
     d = get_definition_by_name(name)
@@ -256,16 +297,19 @@ async def delete_definition(name: str, _=Depends(verify_token)):
 @limiter.limit("10/minute")           # per IP: 10 queries/min — protects Groq 30 RPM
 async def run_query(request: Request, body: QueryRequest):
     session_id = body.session_id or str(uuid.uuid4())
-    qid = hashlib.md5(f"{body.question}{time.time()}".encode()).hexdigest()[:12]
+    uid = get_current_user()
+    qid = hashlib.md5(f"{uid}{body.question}{time.time()}".encode()).hexdigest()[:12]
     t0 = time.time()
 
     loop = asyncio.get_event_loop()
+    ctx = contextvars.copy_context()  # carry the user scope into the worker thread
     result = await loop.run_in_executor(
         _executor,
-        lambda: run_query_pipeline(
+        lambda: ctx.run(
+            run_query_pipeline,
             question=body.question,
             data_db_path=DATA_DB if body.run_query else None,
-            thread_id=session_id,
+            thread_id=f"{uid}:{session_id}",  # isolates LangGraph checkpoints per user
         )
     )
 
@@ -317,32 +361,6 @@ def submit_feedback(body: FeedbackRequest):
             )
             
     return {"status": "ok", "message": "Feedback recorded"}
-
-@app.get("/api/definitions/usage")
-def definition_usage():
-    """Shows which definitions are actually being used in production."""
-    import sqlite3
-    conn = sqlite3.connect(DATA_DB)
-    # Actually wait, the query_log is in definitiondrift.db, not DATA_DB
-    # We must connect to the same DB that query_log is in!
-    from store.db import DB_PATH
-    conn2 = sqlite3.connect(DB_PATH)
-    rows = conn2.execute("""
-        SELECT
-            json_each.value AS def_name,
-            COUNT(*) AS query_count,
-            AVG(latency_ms) AS avg_latency,
-            SUM(CASE WHEN feedback=1 THEN 1 ELSE 0 END) AS thumbs_up,
-            SUM(CASE WHEN feedback=-1 THEN 1 ELSE 0 END) AS thumbs_down
-        FROM query_log, json_each(query_log.used_definitions)
-        WHERE used_definitions IS NOT NULL
-        GROUP BY def_name
-        ORDER BY query_count DESC
-    """).fetchall()
-    conn2.close()
-    return {"usage": [dict(zip(
-        ["name","query_count","avg_latency","thumbs_up","thumbs_down"], r
-    )) for r in rows]}
 
 # ── Query history ─────────────────────────────────────────────────────────────
 @app.get("/api/history")
@@ -457,8 +475,8 @@ async def clear_conversation(session_id: str, _=Depends(verify_token)):
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await manager.connect(ws)
+async def websocket_endpoint(ws: WebSocket, user_id: Optional[str] = Query(None)):
+    await manager.connect(ws, _clean_user_id(user_id))
     try:
         while True:
             data = await ws.receive_text()
